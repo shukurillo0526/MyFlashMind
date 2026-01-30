@@ -35,6 +35,19 @@ class Flashcard extends HiveObject {
   @HiveField(9)
   bool isStarred;
 
+  // SM-2 Spaced Repetition Fields
+  @HiveField(10)
+  double easinessFactor;
+
+  @HiveField(11)
+  int interval; // in days
+
+  @HiveField(12)
+  int repetitions;
+
+  @HiveField(13)
+  DateTime? nextReviewDate;
+
   Flashcard({
     required this.id,
     required this.term,
@@ -46,6 +59,10 @@ class Flashcard extends HiveObject {
     this.timesIncorrect = 0,
     this.lastStudied,
     this.isStarred = false,
+    this.easinessFactor = 2.5,
+    this.interval = 1,
+    this.repetitions = 0,
+    this.nextReviewDate,
   });
 
   /// Calculate accuracy percentage
@@ -61,7 +78,13 @@ class Flashcard extends HiveObject {
     return total >= 3 && accuracy >= 80;
   }
 
-  /// Create a copy with updated fields
+  /// Check if card is due for review (SM-2)
+  bool get isDue {
+    if (nextReviewDate == null) return true;
+    return DateTime.now().isAfter(nextReviewDate!) || 
+           DateTime.now().day == nextReviewDate!.day;
+  }
+
   Flashcard copyWith({
     String? id,
     String? term,
@@ -73,6 +96,10 @@ class Flashcard extends HiveObject {
     int? timesIncorrect,
     DateTime? lastStudied,
     bool? isStarred,
+    double? easinessFactor,
+    int? interval,
+    int? repetitions,
+    DateTime? nextReviewDate,
   }) {
     return Flashcard(
       id: id ?? this.id,
@@ -85,10 +112,13 @@ class Flashcard extends HiveObject {
       timesIncorrect: timesIncorrect ?? this.timesIncorrect,
       lastStudied: lastStudied ?? this.lastStudied,
       isStarred: isStarred ?? this.isStarred,
+      easinessFactor: easinessFactor ?? this.easinessFactor,
+      interval: interval ?? this.interval,
+      repetitions: repetitions ?? this.repetitions,
+      nextReviewDate: nextReviewDate ?? this.nextReviewDate,
     );
   }
 
-  /// Convert to JSON map
   Map<String, dynamic> toJson() {
     return {
       'id': id,
@@ -101,10 +131,13 @@ class Flashcard extends HiveObject {
       'timesIncorrect': timesIncorrect,
       'lastStudied': lastStudied?.toIso8601String(),
       'isStarred': isStarred,
+      'easinessFactor': easinessFactor,
+      'interval': interval,
+      'repetitions': repetitions,
+      'nextReviewDate': nextReviewDate?.toIso8601String(),
     };
   }
 
-  /// Create from JSON map
   factory Flashcard.fromJson(Map<String, dynamic> json) {
     return Flashcard(
       id: json['id'] as String,
@@ -119,6 +152,12 @@ class Flashcard extends HiveObject {
           ? DateTime.parse(json['lastStudied'] as String)
           : null,
       isStarred: json['isStarred'] as bool? ?? false,
+      easinessFactor: (json['easinessFactor'] as num?)?.toDouble() ?? 2.5,
+      interval: json['interval'] as int? ?? 1,
+      repetitions: json['repetitions'] as int? ?? 0,
+      nextReviewDate: json['nextReviewDate'] != null
+          ? DateTime.parse(json['nextReviewDate'] as String)
+          : null,
     );
   }
 }

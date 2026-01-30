@@ -6,11 +6,15 @@ import '../../../data/models/flashcard_set.dart';
 class ProgressCard extends StatelessWidget {
   final FlashcardSet flashcardSet;
   final VoidCallback? onTap;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   const ProgressCard({
     super.key,
     required this.flashcardSet,
     this.onTap,
+    this.onEdit,
+    this.onDelete,
   });
 
   @override
@@ -41,11 +45,37 @@ class ProgressCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                IconButton(
+                PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert),
-                  onPressed: () {},
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      onEdit?.call();
+                    } else if (value == 'delete') {
+                      onDelete?.call();
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit, size: 20),
+                          SizedBox(width: 8),
+                          Text('Edit'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline, color: AppColors.error, size: 20),
+                          SizedBox(width: 8),
+                          Text('Delete', style: TextStyle(color: AppColors.error)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

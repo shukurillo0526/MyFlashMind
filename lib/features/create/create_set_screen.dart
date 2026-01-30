@@ -4,7 +4,9 @@ import 'package:uuid/uuid.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/flashcard.dart';
 import '../../data/models/flashcard_set.dart';
+import '../../data/models/folder.dart';
 import '../../data/services/storage_service.dart';
+import '../../data/services/supabase_service.dart';
 
 /// Screen for creating/editing a flashcard set
 class CreateSetScreen extends StatefulWidget {
@@ -20,6 +22,8 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
   final List<_CardEntry> _cards = [];
+  List<Folder> _folders = [];
+  String? _selectedFolderId;
   bool _isEditing = false;
 
   @override
@@ -32,6 +36,11 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
       _cards.add(_CardEntry());
       _cards.add(_CardEntry());
     }
+    _loadFolders();
+  }
+
+  void _loadFolders() {
+    _folders = context.read<StorageService>().getAllFolders();
   }
 
   void _loadExistingSet() {
@@ -39,12 +48,15 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
     if (set != null) {
       _isEditing = true;
       _titleController.text = set.title;
+      _titleController.text = set.title;
       _descriptionController.text = set.description ?? '';
+      _selectedFolderId = set.folderId;
       for (final card in set.cards) {
         _cards.add(_CardEntry(
           id: card.id,
           term: card.term,
           definition: card.definition,
+          imageUrl: card.imageUrl,
         ));
       }
     }
@@ -57,6 +69,7 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
     for (final card in _cards) {
       card.termController.dispose();
       card.definitionController.dispose();
+      card.imageUrlController.dispose();
     }
     super.dispose();
   }
@@ -72,6 +85,7 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
       setState(() {
         _cards[index].termController.dispose();
         _cards[index].definitionController.dispose();
+        _cards[index].imageUrlController.dispose();
         _cards.removeAt(index);
       });
     }
@@ -105,6 +119,9 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
         id: c.id ?? const Uuid().v4(),
         term: c.termController.text.trim(),
         definition: c.definitionController.text.trim(),
+        imageUrl: c.imageUrlController.text.trim().isNotEmpty 
+            ? c.imageUrlController.text.trim() 
+            : null,
       );
     }).toList();
 
@@ -119,9 +136,26 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
           ? context.read<StorageService>().getSet(widget.editSetId!)?.createdAt ?? now
           : now,
       updatedAt: now,
+      folderId: _selectedFolderId,
     );
 
-    await context.read<StorageService>().saveSet(set);
+    // Save locally
+    final storage = context.read<StorageService>();
+    final supabase = context.read<SupabaseService>();
+    
+    await storage.saveSet(set);
+    await supabase.saveSet(set);
+
+    // Update folder if assigned
+    if (_selectedFolderId != null) {
+      final folder = _folders.firstWhere((f) => f.id == _selectedFolderId);
+      if (!folder.setIds.contains(set.id)) {
+        folder.setIds.add(set.id);
+        folder.updatedAt = DateTime.now();
+        await storage.saveFolder(folder);
+        await supabase.saveFolder(folder);
+      }
+    }
 
     if (mounted) {
       Navigator.of(context).pop(true);
@@ -175,6 +209,27 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
                     labelStyle: TextStyle(color: AppColors.textSecondary),
                   ),
                 ),
+                const SizedBox(height: 12),
+                if (_folders.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    value: _selectedFolderId,
+                    decoration: InputDecoration(
+                      labelText: 'Folder (Optional)',
+                      labelStyle: TextStyle(color: AppColors.textSecondary),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    items: _folders.map((folder) {
+                      return DropdownMenuItem(
+                        value: folder.id,
+                        child: Text(folder.name),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedFolderId = value;
+                      });
+                    },
+                  ),
               ],
             ),
           ),
@@ -267,7 +322,7 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
 
           // Definition input
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: TextField(
               controller: card.definitionController,
               decoration: const InputDecoration(
@@ -285,6 +340,57 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
               ),
             ),
           ),
+
+          // Image URL input
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: TextField(
+              controller: card.imageUrlController,
+              decoration: InputDecoration(
+                hintText: 'Image URL (optional)',
+                prefixIcon: const Icon(Icons.image_outlined, size: 20),
+                border: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.surface),
+                ),
+                enabledBorder: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.surface),
+                ),
+                focusedBorder: const UnderlineInputBorder(
+                  borderSide: BorderSide(color: AppColors.primary),
+                ),
+                filled: false,
+                suffixIcon: card.imageUrlController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () => setState(() => card.imageUrlController.clear()),
+                      )
+                    : null,
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+
+          // Image preview
+          if (card.imageUrlController.text.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  card.imageUrlController.text,
+                  height: 80,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    height: 60,
+                    color: AppColors.surface,
+                    child: const Center(
+                      child: Icon(Icons.broken_image, color: AppColors.textSecondary),
+                    ),
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -296,11 +402,14 @@ class _CardEntry {
   final String? id;
   final TextEditingController termController;
   final TextEditingController definitionController;
+  final TextEditingController imageUrlController;
 
   _CardEntry({
     this.id,
     String? term,
     String? definition,
+    String? imageUrl,
   })  : termController = TextEditingController(text: term),
-        definitionController = TextEditingController(text: definition);
+        definitionController = TextEditingController(text: definition),
+        imageUrlController = TextEditingController(text: imageUrl);
 }

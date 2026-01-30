@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/services/storage_service.dart';
+import '../../data/services/supabase_service.dart';
 import '../../core/utils/quizlet_parser.dart';
 
 /// Screen for importing flashcards from Quizlet
@@ -49,7 +50,10 @@ class _ImportQuizletScreenState extends State<ImportQuizletScreen>
     try {
       final result = await QuizletParser.importFromUrl(url);
       if (result != null) {
+        // Save locally
         await context.read<StorageService>().saveSet(result);
+        // Sync to cloud
+        await context.read<SupabaseService>().saveSet(result);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Imported "${result.title}" with ${result.termCount} cards')),
@@ -66,7 +70,7 @@ class _ImportQuizletScreenState extends State<ImportQuizletScreen>
     }
   }
 
-  void _importFromPaste() {
+  Future<void> _importFromPaste() async {
     final text = _pasteController.text.trim();
     if (text.isEmpty) {
       setState(() => _error = 'Please paste your flashcard data');
@@ -76,11 +80,16 @@ class _ImportQuizletScreenState extends State<ImportQuizletScreen>
     try {
       final result = QuizletParser.parseFromText(text);
       if (result != null && result.cards.isNotEmpty) {
-        context.read<StorageService>().saveSet(result);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Imported "${result.title}" with ${result.termCount} cards')),
-        );
-        Navigator.of(context).pop();
+        // Save locally
+        await context.read<StorageService>().saveSet(result);
+        // Sync to cloud
+        await context.read<SupabaseService>().saveSet(result);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Imported "${result.title}" with ${result.termCount} cards')),
+          );
+          Navigator.of(context).pop();
+        }
       } else {
         setState(() => _error = 'Could not parse the pasted text');
       }

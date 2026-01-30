@@ -60,11 +60,14 @@ class FlashcardSet extends HiveObject {
   /// Number of terms in the set
   int get termCount => cards.length;
 
-  /// Calculate overall progress percentage
-  double get progressPercentage {
+  /// Calculate overall progress (0.0 to 1.0)
+  double get progress {
     if (cards.isEmpty) return 0;
-    return (cardsKnown / cards.length) * 100;
+    return cardsKnown / cards.length;
   }
+  
+  /// Progress as percentage (0-100)
+  int get masteryPercentage => (progress * 100).round();
 
   /// Get counts for progress bar segments
   Map<String, int> get progressSegments {

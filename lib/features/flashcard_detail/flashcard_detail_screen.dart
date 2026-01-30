@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../../core/utils/toast_utils.dart';
 import 'package:flip_card/flip_card.dart';
+import 'package:uuid/uuid.dart';
 import '../../core/theme/app_colors.dart';
+import '../../data/models/flashcard.dart';
 import '../../data/models/flashcard_set.dart';
+import '../../data/models/folder.dart';
 import '../../data/services/storage_service.dart';
+import '../../data/services/supabase_service.dart';
 import '../create/create_set_screen.dart';
 import '../study_modes/flashcards/flashcards_screen.dart';
 import '../study_modes/learn/learn_screen.dart';
@@ -256,9 +262,124 @@ class _FlashcardDetailScreenState extends State<FlashcardDetailScreen> {
               ),
             ),
             const SizedBox(height: 24),
+
+            // Statistics Section
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Your Progress',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          AppColors.primary.withOpacity(0.1),
+                          AppColors.secondary.withOpacity(0.1),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppColors.surface,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildStatItem(
+                          icon: Icons.emoji_events,
+                          color: AppColors.accent,
+                          value: '${(_set!.progress * 100).round()}%',
+                          label: 'Mastery',
+                        ),
+                        Container(
+                          width: 1,
+                          height: 40,
+                          color: AppColors.surface,
+                        ),
+                        _buildStatItem(
+                          icon: Icons.check_circle,
+                          color: AppColors.success,
+                          value: '${_calculateAccuracy()}%',
+                          label: 'Accuracy',
+                        ),
+                        Container(
+                          width: 1,
+                          height: 40,
+                          color: AppColors.surface,
+                        ),
+                        _buildStatItem(
+                          icon: Icons.access_time,
+                          color: AppColors.secondary,
+                          value: _getLastStudiedText(),
+                          label: 'Last Study',
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
           ],
         ),
       ),
+    );
+  }
+
+  int _calculateAccuracy() {
+    int totalCorrect = 0;
+    int totalAttempts = 0;
+    for (final card in _set!.cards) {
+      totalCorrect += card.timesCorrect;
+      totalAttempts += card.timesCorrect + card.timesIncorrect;
+    }
+    if (totalAttempts == 0) return 0;
+    return (totalCorrect / totalAttempts * 100).round();
+  }
+
+  String _getLastStudiedText() {
+    if (_set!.lastStudied == null) return 'Never';
+    final diff = DateTime.now().difference(_set!.lastStudied!);
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    if (diff.inDays < 7) return '${diff.inDays}d ago';
+    return '${(diff.inDays / 7).round()}w ago';
+  }
+
+  Widget _buildStatItem({
+    required IconData icon,
+    required Color color,
+    required String value,
+    required String label,
+  }) {
+    return Column(
+      children: [
+        Icon(icon, color: color, size: 24),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 16,
+            color: color,
+          ),
+        ),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
     );
   }
 
@@ -325,6 +446,134 @@ class _FlashcardDetailScreenState extends State<FlashcardDetailScreen> {
     );
   }
 
+  Future<void> _duplicateSet() async {
+    if (_set == null) return;
+    
+    final newSetId = const Uuid().v4();
+    final now = DateTime.now();
+    
+    final newCards = _set!.cards.map((c) => Flashcard(
+      id: const Uuid().v4(),
+      term: c.term,
+      definition: c.definition,
+    )).toList();
+
+    final newSet = FlashcardSet(
+      id: newSetId,
+      title: '${_set!.title} (Copy)',
+      description: _set!.description,
+      cards: newCards,
+      createdAt: now,
+      updatedAt: now,
+      cardsKnown: 0,
+      cardsLearning: 0,
+    );
+    
+    final storage = context.read<StorageService>();
+    final supabase = context.read<SupabaseService>();
+    
+    await storage.saveSet(newSet);
+    await supabase.saveSet(newSet);
+    
+    if (mounted) {
+      ToastUtils.showInfo(context, 'Set copied');
+    }
+  }
+
+  void _addToFolder() {
+    final folders = context.read<StorageService>().getAllFolders();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.cardBackground,
+        title: const Text('Add to folder'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: folders.isEmpty 
+              ? const Text('No folders created yet.')
+              : ListView.builder(
+            shrinkWrap: true,
+            itemCount: folders.length,
+            itemBuilder: (context, index) {
+              final folder = folders[index];
+              final isInFolder = folder.setIds.contains(_set!.id);
+              return ListTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(folder.name),
+                trailing: isInFolder ? const Icon(Icons.check_circle, color: AppColors.primary) : null,
+                onTap: () async {
+                  if (!isInFolder) {
+                     folder.setIds.add(_set!.id);
+                     folder.updatedAt = DateTime.now();
+                     await context.read<StorageService>().saveFolder(folder);
+                     await context.read<SupabaseService>().saveFolder(folder);
+                     
+                     _set!.folderId = folder.id;
+                      await context.read<StorageService>().saveSet(_set!);
+                      await context.read<SupabaseService>().saveSet(_set!);
+                      
+                     if (mounted) {
+                       Navigator.pop(context);
+                       ToastUtils.showInfo(context, 'Added to ${folder.name}');
+                     }
+                  } else {
+                     folder.setIds.remove(_set!.id);
+                     folder.updatedAt = DateTime.now();
+                      await context.read<StorageService>().saveFolder(folder);
+                      await context.read<SupabaseService>().saveFolder(folder);
+                      
+                      if (_set!.folderId == folder.id) {
+                        _set!.folderId = null;
+                        await context.read<StorageService>().saveSet(_set!);
+                        await context.read<SupabaseService>().saveSet(_set!);
+                      }
+
+                      if (mounted) {
+                       Navigator.pop(context);
+                       ToastUtils.showInfo(context, 'Removed from ${folder.name}');
+                     }
+                  }
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSetInfo() {
+     showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.cardBackground,
+        title: const Text('Set Info'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Author: You'),
+            const SizedBox(height: 8),
+            Text('Created: ${_set!.createdAt.toString().split(' ')[0]}'),
+            const SizedBox(height: 8),
+            Text('Terms: ${_set!.termCount}'),
+            const SizedBox(height: 8),
+            Text('Progress: ${(_set!.progress * 100).round()}%'),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+        ],
+      ),
+    );
+  }
+
   void _showOptionsMenu() {
     showModalBottomSheet(
       context: context,
@@ -332,62 +581,99 @@ class _FlashcardDetailScreenState extends State<FlashcardDetailScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (context) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            margin: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(2),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.edit),
-            title: const Text('Edit'),
-            onTap: () {
-              Navigator.pop(context);
-              _editSet();
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.share),
-            title: const Text('Share'),
-            onTap: () => Navigator.pop(context),
-          ),
-          ListTile(
-            leading: const Icon(Icons.delete, color: AppColors.error),
-            title: const Text('Delete', style: TextStyle(color: AppColors.error)),
-            onTap: () async {
-              Navigator.pop(context);
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (context) => AlertDialog(
-                  backgroundColor: AppColors.cardBackground,
-                  title: const Text('Delete set?'),
-                  content: Text('Delete "${_set!.title}"? This cannot be undone.'),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, false),
-                      child: const Text('Cancel'),
-                    ),
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, true),
-                      child: const Text('Delete', style: TextStyle(color: AppColors.error)),
-                    ),
-                  ],
-                ),
-              );
-              if (confirm == true && mounted) {
-                await context.read<StorageService>().deleteSet(_set!.id);
+            ListTile(
+              leading: const Icon(Icons.edit),
+              title: const Text('Edit set'),
+              onTap: () {
                 Navigator.pop(context);
-              }
-            },
-          ),
-          const SizedBox(height: 16),
-        ],
+                _editSet();
+              },
+            ),
+             ListTile(
+              leading: const Icon(Icons.folder_open),
+              title: const Text('Add to folder'),
+              onTap: () {
+                Navigator.pop(context);
+                _addToFolder();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.copy),
+              title: const Text('Make a copy'),
+              onTap: () {
+                Navigator.pop(context);
+                _duplicateSet();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.share),
+              title: const Text('Share'),
+              onTap: () {
+                Navigator.pop(context);
+                Clipboard.setData(ClipboardData(
+                  text: 'Check out my flashcard set "${_set!.title}" on MyFlashMind! (${_set!.termCount} terms)',
+                ));
+                if (mounted) {
+                  ToastUtils.showInfo(context, 'Link copied to clipboard');
+                }
+              },
+            ),
+             ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Set info'),
+              onTap: () {
+                Navigator.pop(context);
+                _showSetInfo();
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.delete, color: AppColors.error),
+              title: const Text('Delete set', style: TextStyle(color: AppColors.error)),
+              onTap: () async {
+                Navigator.pop(context);
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    backgroundColor: AppColors.cardBackground,
+                    title: const Text('Delete set?'),
+                    content: Text('Delete "${_set!.title}"? This cannot be undone.'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('Cancel'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('Delete', style: TextStyle(color: AppColors.error)),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true && mounted) {
+                  await context.read<StorageService>().deleteSet(_set!.id);
+                  if (mounted) {
+                    Navigator.pop(context);
+                  }
+                }
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
   }

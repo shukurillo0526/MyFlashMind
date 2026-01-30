@@ -4,8 +4,12 @@ import '../../core/theme/app_colors.dart';
 import '../../data/models/flashcard_set.dart';
 import '../../data/models/folder.dart';
 import '../../data/services/storage_service.dart';
+import '../../data/services/supabase_service.dart';
 import '../flashcard_detail/flashcard_detail_screen.dart';
 import '../create/create_set_screen.dart';
+import 'package:uuid/uuid.dart';
+import '../../core/utils/toast_utils.dart';
+import 'folder_detail_screen.dart';
 
 /// Library screen with tabs for flashcard sets and folders
 class LibraryScreen extends StatefulWidget {
@@ -20,8 +24,12 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final _searchController = TextEditingController();
   List<FlashcardSet> _sets = [];
   List<Folder> _folders = [];
+  List<FlashcardSet> _filteredSets = [];
+  List<Folder> _filteredFolders = [];
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -41,6 +49,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -49,6 +58,30 @@ class _LibraryScreenState extends State<LibraryScreen>
     setState(() {
       _sets = storage.getAllSets();
       _folders = storage.getAllFolders();
+      _applySearch();
+    });
+  }
+
+  void _applySearch() {
+    if (_searchQuery.isEmpty) {
+      _filteredSets = _sets;
+      _filteredFolders = _folders;
+    } else {
+      final query = _searchQuery.toLowerCase();
+      _filteredSets = _sets.where((s) => 
+        s.title.toLowerCase().contains(query) ||
+        (s.description?.toLowerCase().contains(query) ?? false)
+      ).toList();
+      _filteredFolders = _folders.where((f) => 
+        f.name.toLowerCase().contains(query)
+      ).toList();
+    }
+  }
+
+  void _onSearch(String query) {
+    setState(() {
+      _searchQuery = query;
+      _applySearch();
     });
   }
 
@@ -64,6 +97,62 @@ class _LibraryScreenState extends State<LibraryScreen>
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const CreateSetScreen(),
+      ),
+    ).then((_) => _loadData());
+  }
+
+  void _createNewFolder() {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.cardBackground,
+        title: const Text('New Folder'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Folder name',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isEmpty) return;
+              
+              final now = DateTime.now();
+              final folder = Folder(
+                id: const Uuid().v4(),
+                name: name,
+                createdAt: now,
+                updatedAt: now,
+              );
+              
+              await context.read<StorageService>().saveFolder(folder);
+              await context.read<SupabaseService>().saveFolder(folder);
+              
+              if (mounted) {
+                Navigator.pop(context);
+                _loadData();
+                ToastUtils.showInfo(context, 'Folder created');
+              }
+            },
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _openFolder(Folder folder) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => FolderDetailScreen(folderId: folder.id),
       ),
     ).then((_) => _loadData());
   }
@@ -89,7 +178,10 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
 
     if (confirm == true && mounted) {
+      // Delete locally
       await context.read<StorageService>().deleteSet(set.id);
+      // Delete from cloud
+      await context.read<SupabaseService>().deleteSet(set.id);
       _loadData();
     }
   }
@@ -115,7 +207,10 @@ class _LibraryScreenState extends State<LibraryScreen>
     );
 
     if (confirm == true && mounted) {
+      // Delete locally
       await context.read<StorageService>().deleteFolder(folder.id);
+      // Delete from cloud
+      await context.read<SupabaseService>().deleteFolder(folder.id);
       _loadData();
     }
   }
@@ -153,8 +248,7 @@ class _LibraryScreenState extends State<LibraryScreen>
                     'Your library',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
-                  IconButton(
-                    onPressed: _createNewSet,
+                  PopupMenuButton<String>(
                     icon: Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -163,10 +257,69 @@ class _LibraryScreenState extends State<LibraryScreen>
                       ),
                       child: const Icon(Icons.add, size: 20),
                     ),
+                    onSelected: (value) {
+                      if (value == 'set') {
+                        _createNewSet();
+                      } else if (value == 'folder') {
+                        _createNewFolder();
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(
+                        value: 'set',
+                        child: Row(
+                          children: [
+                            Icon(Icons.style, size: 20),
+                            SizedBox(width: 12),
+                            Text('New flashcard set'),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuItem(
+                        value: 'folder',
+                        child: Row(
+                          children: [
+                            Icon(Icons.folder, size: 20),
+                            SizedBox(width: 12),
+                            Text('New folder'),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
+
+            // Search bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                controller: _searchController,
+                onChanged: _onSearch,
+                decoration: InputDecoration(
+                  hintText: 'Search your library...',
+                  prefixIcon: const Icon(Icons.search, color: AppColors.textSecondary),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, size: 20),
+                          onPressed: () {
+                            _searchController.clear();
+                            _onSearch('');
+                          },
+                        )
+                      : null,
+                  filled: true,
+                  fillColor: AppColors.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
 
             // Tab bar
             Container(
@@ -202,18 +355,18 @@ class _LibraryScreenState extends State<LibraryScreen>
   }
 
   Widget _buildSetsTab() {
-    if (_sets.isEmpty) {
+    if (_filteredSets.isEmpty) {
       return _buildEmptyState(
         icon: Icons.style_outlined,
-        title: 'No flashcard sets yet',
-        subtitle: 'Create your first set to start learning',
-        onAction: _createNewSet,
+        title: _searchQuery.isEmpty ? 'No flashcard sets yet' : 'No results found',
+        subtitle: _searchQuery.isEmpty ? 'Create your first set to start learning' : 'Try a different search term',
+        onAction: _searchQuery.isEmpty ? _createNewSet : null,
       );
     }
 
     // Group sets by month
     final grouped = <String, List<FlashcardSet>>{};
-    for (final set in _sets) {
+    for (final set in _filteredSets) {
       final label = _getDateGroupLabel(set.createdAt);
       grouped.putIfAbsent(label, () => []).add(set);
     }
@@ -298,19 +451,19 @@ class _LibraryScreenState extends State<LibraryScreen>
   }
 
   Widget _buildFoldersTab() {
-    if (_folders.isEmpty) {
+    if (_filteredFolders.isEmpty) {
       return _buildEmptyState(
         icon: Icons.folder_outlined,
-        title: 'No folders yet',
-        subtitle: 'Create folders to organize your sets',
+        title: _searchQuery.isEmpty ? 'No folders yet' : 'No results found',
+        subtitle: _searchQuery.isEmpty ? 'Create folders to organize your sets' : 'Try a different search term',
       );
     }
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: _folders.length,
+      itemCount: _filteredFolders.length,
       itemBuilder: (context, index) {
-        final folder = _folders[index];
+        final folder = _filteredFolders[index];
         return Dismissible(
           key: Key(folder.id),
           direction: DismissDirection.endToStart,
@@ -322,6 +475,7 @@ class _LibraryScreenState extends State<LibraryScreen>
           ),
           onDismissed: (_) => _deleteFolder(folder),
           child: ListTile(
+            onTap: () => _openFolder(folder),
             contentPadding: EdgeInsets.zero,
             leading: Container(
               width: 48,

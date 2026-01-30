@@ -1,9 +1,12 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/models/flashcard.dart';
 import '../../../data/models/flashcard_set.dart';
 import '../../../data/services/storage_service.dart';
+import '../../../data/services/supabase_service.dart';
+import '../../../data/services/spaced_repetition_service.dart';
 
 /// Flashcard swipe study mode
 /// - Tap to flip card
@@ -24,6 +27,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   int _currentIndex = 0;
   bool _showingFront = true;
   bool _isComplete = false;
+  double _dragOffset = 0; // Track horizontal drag for visual feedback
 
   // Tracking
   List<Flashcard> _knowCards = [];
@@ -52,18 +56,44 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   }
 
   void _markKnow() {
-    if (_currentIndex >= _cards.length) return;
-    
-    final card = _cards[_currentIndex];
-    _knowCards.add(card);
-    _nextCard();
+    _rateCard(4); // Good
   }
 
   void _markLearning() {
+    _rateCard(0); // Again
+  }
+
+  /// Rate the current card with SM-2 quality (0-5)
+  void _rateCard(int quality) {
     if (_currentIndex >= _cards.length) return;
     
     final card = _cards[_currentIndex];
-    _learningCards.add(card);
+    final sr = SpacedRepetitionService();
+    
+    // Calculate new review parameters
+    final result = sr.calculateNextReview(
+      currentEF: card.easinessFactor,
+      currentInterval: card.interval,
+      currentRepetitions: card.repetitions,
+      quality: quality,
+    );
+    
+    // Update card with new values
+    card.easinessFactor = result.ef;
+    card.interval = result.interval;
+    card.repetitions = result.repetitions;
+    card.nextReviewDate = result.nextReview;
+    card.lastStudied = DateTime.now();
+    
+    // Track for summary
+    if (quality >= 3) {
+      card.timesCorrect++;
+      _knowCards.add(card);
+    } else {
+      card.timesIncorrect++;
+      _learningCards.add(card);
+    }
+    
     _nextCard();
   }
 
@@ -82,20 +112,13 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   void _saveProgress() async {
     if (_set == null) return;
     
-    // Update card statistics
-    for (final card in _knowCards) {
-      card.timesCorrect++;
-      card.lastStudied = DateTime.now();
-    }
-    for (final card in _learningCards) {
-      card.timesIncorrect++;
-      card.lastStudied = DateTime.now();
-    }
-    
     _set!.lastStudied = DateTime.now();
     _set!.updateProgress();
     
+    // Save locally
     await context.read<StorageService>().saveSet(_set!);
+    // Sync to cloud
+    await context.read<SupabaseService>().saveSet(_set!);
   }
 
   void _restart({bool learnOnly = false}) {
@@ -166,13 +189,19 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
 
     return GestureDetector(
       onTap: _flipCard,
+      onHorizontalDragUpdate: (details) {
+        setState(() => _dragOffset += details.delta.dx);
+      },
       onHorizontalDragEnd: (details) {
-        if (details.primaryVelocity == null) return;
-        if (details.primaryVelocity! > 200) {
-          _markKnow();
-        } else if (details.primaryVelocity! < -200) {
-          _markLearning();
+        if (_dragOffset > 100) {
+          _rateCard(4); // Good - swipe right
+        } else if (_dragOffset < -100) {
+          _rateCard(0); // Again - swipe left
         }
+        setState(() => _dragOffset = 0);
+      },
+      onHorizontalDragCancel: () {
+        setState(() => _dragOffset = 0);
       },
       child: Column(
         children: [
@@ -190,44 +219,163 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
             ),
           ),
 
-          // Card
+          // Card with 3D flip and swipe indicator
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: Container(
-                  key: ValueKey('${card.id}_$_showingFront'),
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: AppColors.cardBackground,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Stack(
-                    children: [
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(32),
-                          child: Text(
-                            text,
-                            style: Theme.of(context).textTheme.headlineMedium,
-                            textAlign: TextAlign.center,
+              child: Stack(
+                children: [
+                  // Swipe indicator overlays
+                  if (_dragOffset != 0)
+                    Positioned.fill(
+                      child: AnimatedOpacity(
+                        opacity: (_dragOffset.abs() / 150).clamp(0, 0.6),
+                        duration: const Duration(milliseconds: 50),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: _dragOffset > 0 
+                                ? AppColors.success.withOpacity(0.2)
+                                : AppColors.error.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Center(
+                            child: Icon(
+                              _dragOffset > 0 ? Icons.check_circle : Icons.refresh,
+                              size: 64,
+                              color: _dragOffset > 0 ? AppColors.success : AppColors.error,
+                            ),
                           ),
                         ),
                       ),
-                      Positioned(
-                        bottom: 16,
-                        left: 0,
-                        right: 0,
-                        child: Text(
-                          'Tap to flip',
-                          style: Theme.of(context).textTheme.bodySmall,
-                          textAlign: TextAlign.center,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  // Card content with drag offset
+                  Transform.translate(
+                    offset: Offset(_dragOffset * 0.3, 0),
+                    child: Transform.rotate(
+                      angle: _dragOffset * 0.001,
+                      child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(
+                  begin: _showingFront ? 1.0 : 0.0,
+                  end: _showingFront ? 0.0 : 1.0,
                 ),
+                duration: const Duration(milliseconds: 400),
+                curve: Curves.easeInOut,
+                builder: (context, value, child) {
+                  final angle = value * math.pi;
+                  final isFrontVisible = value < 0.5;
+                  final displayText = isFrontVisible ? card.term : card.definition;
+                  
+                  return Transform(
+                    alignment: Alignment.center,
+                    transform: Matrix4.identity()
+                      ..setEntry(3, 2, 0.001)
+                      ..rotateY(angle),
+                    child: Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: _showingFront
+                              ? [AppColors.cardBackground, AppColors.surface]
+                              : [AppColors.primary.withOpacity(0.15), AppColors.cardBackground],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primary.withOpacity(0.1),
+                            blurRadius: 20,
+                            spreadRadius: 0,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Stack(
+                        children: [
+                          // Side indicator
+                          Positioned(
+                            top: 16,
+                            left: 16,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: _showingFront 
+                                    ? AppColors.primary.withOpacity(0.2)
+                                    : AppColors.secondary.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                _showingFront ? 'TERM' : 'DEFINITION',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: _showingFront ? AppColors.primary : AppColors.secondary,
+                                  letterSpacing: 1,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Transform(
+                                alignment: Alignment.center,
+                                transform: Matrix4.identity()..rotateY(value >= 0.5 ? math.pi : 0),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (!isFrontVisible && card.imageUrl != null)
+                                      Padding(
+                                        padding: const EdgeInsets.only(bottom: 16),
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(12),
+                                          child: Image.network(
+                                            card.imageUrl!,
+                                            height: 120,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) =>
+                                                const Icon(Icons.broken_image, size: 48, color: AppColors.textSecondary),
+                                          ),
+                                        ),
+                                      ),
+                                    Text(
+                                      displayText,
+                                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            bottom: 16,
+                            left: 0,
+                            right: 0,
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.touch_app, size: 16, color: AppColors.textSecondary),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Tap to flip',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -262,34 +410,37 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
             ),
           ),
 
-          // Buttons for accessibility
+          // SM-2 Rating Buttons
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
             child: Row(
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _markLearning,
-                    icon: const Icon(Icons.close),
-                    label: const Text('Learning'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.warning,
-                      side: const BorderSide(color: AppColors.warning),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
+                _buildRatingButton(
+                  label: 'Again',
+                  color: AppColors.error,
+                  quality: 0,
+                  interval: '<1m',
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _markKnow,
-                    icon: const Icon(Icons.check),
-                    label: const Text('Know'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.success,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                  ),
+                const SizedBox(width: 8),
+                _buildRatingButton(
+                  label: 'Hard',
+                  color: AppColors.warning,
+                  quality: 3,
+                  interval: '',
+                ),
+                const SizedBox(width: 8),
+                _buildRatingButton(
+                  label: 'Good',
+                  color: AppColors.success,
+                  quality: 4,
+                  interval: '',
+                ),
+                const SizedBox(width: 8),
+                _buildRatingButton(
+                  label: 'Easy',
+                  color: AppColors.primary,
+                  quality: 5,
+                  interval: '',
                 ),
               ],
             ),
@@ -412,6 +563,33 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
             style: TextStyle(color: color),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildRatingButton({
+    required String label,
+    required Color color,
+    required int quality,
+    required String interval,
+  }) {
+    return Expanded(
+      child: ElevatedButton(
+        onPressed: () => _rateCard(quality),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color.withOpacity(0.2),
+          foregroundColor: color,
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: BorderSide(color: color.withOpacity(0.5)),
+          ),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+        ),
       ),
     );
   }

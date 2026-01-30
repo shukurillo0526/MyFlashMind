@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../models/flashcard.dart';
 import '../models/flashcard_set.dart';
@@ -31,9 +32,23 @@ class StorageService {
       Hive.registerAdapter(FolderAdapter());
     }
 
-    // Open boxes
-    _setsBox = await Hive.openBox<FlashcardSet>(_setsBoxName);
-    _foldersBox = await Hive.openBox<Folder>(_foldersBoxName);
+    // Open boxes with error handling for schema mismatches
+    try {
+      _setsBox = await Hive.openBox<FlashcardSet>(_setsBoxName);
+    } catch (e) {
+      // If schema mismatch or corruption, clear the box and try again
+      debugPrint('Error opening flashcard_sets box: $e. Clearing box.');
+      await Hive.deleteBoxFromDisk(_setsBoxName);
+      _setsBox = await Hive.openBox<FlashcardSet>(_setsBoxName);
+    }
+
+    try {
+      _foldersBox = await Hive.openBox<Folder>(_foldersBoxName);
+    } catch (e) {
+      debugPrint('Error opening folders box: $e. Clearing box.');
+      await Hive.deleteBoxFromDisk(_foldersBoxName);
+      _foldersBox = await Hive.openBox<Folder>(_foldersBoxName);
+    }
 
     _initialized = true;
   }
@@ -60,9 +75,37 @@ class StorageService {
     return sets.take(limit).toList();
   }
 
-  /// Get sets in a specific folder
+  /// Get sets that need review (learning cards > 0 or not studied recently)
+  List<FlashcardSet> getSetsNeedingReview({int limit = 5}) {
+    final now = DateTime.now();
+    final sets = getAllSets().where((s) {
+      if (s.cards.isEmpty) return false;
+      
+      // Has learning cards
+      if (s.cardsLearning > 0) return true;
+      
+      // Not fully mastered and not studied in 3 days
+      if (s.progress < 1.0) {
+        if (s.lastStudied == null) return true;
+        final difference = now.difference(s.lastStudied!).inDays;
+        return difference >= 3;
+      }
+      
+      return false;
+    }).toList();
+    
+    // Prioritize by learning count
+    sets.sort((a, b) => b.cardsLearning.compareTo(a.cardsLearning));
+    return sets.take(limit).toList();
+  }
+
+  /// Get sets in a specific folder (checks both set.folderId and folder.setIds)
   List<FlashcardSet> getSetsInFolder(String folderId) {
-    return getAllSets().where((s) => s.folderId == folderId).toList();
+    final folder = getFolder(folderId);
+    final folderSetIds = folder?.setIds ?? [];
+    return getAllSets().where((s) => 
+      s.folderId == folderId || folderSetIds.contains(s.id)
+    ).toList();
   }
 
   /// Save a flashcard set

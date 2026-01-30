@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../data/models/flashcard.dart';
 import '../../../data/models/flashcard_set.dart';
 import '../../../data/services/storage_service.dart';
+import '../../../data/services/supabase_service.dart';
 
 /// Test screen with various question types
 class TestScreen extends StatefulWidget {
@@ -249,7 +250,10 @@ class _TestScreenState extends State<TestScreen> {
     
     _set!.lastStudied = DateTime.now();
     _set!.updateProgress();
+    // Save locally
     await context.read<StorageService>().saveSet(_set!);
+    // Sync to cloud
+    await context.read<SupabaseService>().saveSet(_set!);
   }
 
   @override

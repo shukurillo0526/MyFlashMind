@@ -4,6 +4,7 @@ import 'package:uuid/uuid.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/folder.dart';
 import '../../data/services/storage_service.dart';
+import '../../data/services/supabase_service.dart';
 import 'create_set_screen.dart';
 import 'import_quizlet_screen.dart';
 
@@ -54,7 +55,10 @@ class CreateScreen extends StatelessWidget {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       );
+      // Save locally
       await context.read<StorageService>().saveFolder(folder);
+      // Sync to cloud
+      await context.read<SupabaseService>().saveFolder(folder);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Folder "$name" created')),

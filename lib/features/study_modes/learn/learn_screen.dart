@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../data/models/flashcard.dart';
 import '../../../data/models/flashcard_set.dart';
 import '../../../data/services/storage_service.dart';
+import '../../../data/services/supabase_service.dart';
 
 /// Learn mode with adaptive spaced repetition
 /// - Multiple choice questions
@@ -146,7 +147,10 @@ class _LearnScreenState extends State<LearnScreen> {
     if (_set == null) return;
     _set!.lastStudied = DateTime.now();
     _set!.updateProgress();
+    // Save locally
     await context.read<StorageService>().saveSet(_set!);
+    // Sync to cloud
+    await context.read<SupabaseService>().saveSet(_set!);
   }
 
   @override

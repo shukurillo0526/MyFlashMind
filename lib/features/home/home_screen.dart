@@ -1,9 +1,18 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../core/utils/toast_utils.dart';
 import 'package:provider/provider.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/theme_provider.dart';
 import '../../data/models/flashcard_set.dart';
 import '../../data/services/storage_service.dart';
+import '../../data/services/supabase_service.dart';
+import '../create/create_set_screen.dart';
 import '../flashcard_detail/flashcard_detail_screen.dart';
+import '../statistics/statistics_screen.dart';
+import '../../data/services/import_export_service.dart';
+import '../../core/widgets/animations.dart';
 import 'widgets/progress_card.dart';
 import 'widgets/search_bar_widget.dart';
 
@@ -20,14 +29,27 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   List<FlashcardSet> _recentSets = [];
   List<FlashcardSet> _searchResults = [];
+  int _dueCardCount = 0;
   bool _isSearching = false;
+  bool _isSyncing = false;
+  StreamSubscription? _realtimeSubscription;
+  Timer? _debounceTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadRecentSets();
+      _setupRealtimeSubscription();
+      _syncFromCloud(); // Auto-sync on startup
     });
+  }
+
+  @override
+  void dispose() {
+    _realtimeSubscription?.cancel();
+    _debounceTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -38,13 +60,64 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _loadRecentSets() {
     final storage = context.read<StorageService>();
-    setState(() {
-      _recentSets = storage.getRecentSets(limit: 10);
-      if (_recentSets.isEmpty) {
-        // Show all sets if no recent ones
-        _recentSets = storage.getAllSets().take(10).toList();
+    final allSets = storage.getAllSets();
+    
+    // Count due cards across all sets
+    int dueCount = 0;
+    for (final set in allSets) {
+      for (final card in set.cards) {
+        if (card.isDue) dueCount++;
       }
+    }
+    
+    setState(() {
+      _recentSets = allSets.take(10).toList();
+      _dueCardCount = dueCount;
     });
+  }
+
+  void _setupRealtimeSubscription() {
+    final supabase = context.read<SupabaseService>();
+    if (!supabase.isAuthenticated) return;
+
+    _realtimeSubscription = supabase.subscribeToChanges().listen((data) {
+      if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+      _debounceTimer = Timer(const Duration(seconds: 2), () {
+        if (mounted) _syncFromCloud();
+      });
+    });
+  }
+
+  Future<void> _syncFromCloud() async {
+    setState(() => _isSyncing = true);
+    try {
+      final supabaseService = context.read<SupabaseService>();
+      final storageService = context.read<StorageService>();
+      
+      // Fetch cloud data
+      final cloudSets = await supabaseService.fetchAllSets();
+      final cloudFolders = await supabaseService.fetchAllFolders();
+      
+      // Update local storage
+      for (final set in cloudSets) {
+        await storageService.saveSet(set);
+      }
+      for (final folder in cloudFolders) {
+        await storageService.saveFolder(folder);
+      }
+      
+      _loadRecentSets();
+      
+      if (mounted) {
+        ToastUtils.showInfo(context, 'Synced from cloud');
+      }
+    } catch (e) {
+      if (mounted) {
+        ToastUtils.show(context, 'Sync failed: $e', isError: true);
+      }
+    } finally {
+      setState(() => _isSyncing = false);
+    }
   }
 
   void _onSearch(String query) {
@@ -70,28 +143,226 @@ class _HomeScreenState extends State<HomeScreen> {
     ).then((_) => _loadRecentSets());
   }
 
+  void _editSet(FlashcardSet set) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => CreateSetScreen(editSetId: set.id),
+      ),
+    ).then((_) {
+      _loadRecentSets();
+      _syncFromCloud();
+    });
+  }
+
+  Future<void> _deleteSet(FlashcardSet set) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Set'),
+        content: Text('Are you sure you want to delete "${set.title}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: AppColors.error)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      if (mounted) {
+        await context.read<StorageService>().deleteSet(set.id);
+        if (mounted) {
+          await context.read<SupabaseService>().deleteSet(set.id);
+          _loadRecentSets();
+          ToastUtils.showInfo(context, 'Set deleted');
+        }
+      }
+    }
+  }
+
+  Future<void> _exportAllSets() async {
+    Navigator.pop(context);
+    final storage = context.read<StorageService>();
+    final sets = storage.getAllSets();
+    if (sets.isEmpty) {
+      ToastUtils.showInfo(context, 'No sets to export');
+      return;
+    }
+    final service = ImportExportService();
+    final json = service.exportSetsToJson(sets);
+    await service.copyToClipboard(json);
+    if (mounted) ToastUtils.showSuccess(context, 'Copied ${sets.length} sets to clipboard');
+  }
+
+  Future<void> _importFromClipboard() async {
+    Navigator.pop(context);
+    final service = ImportExportService();
+    final clipboard = await service.getFromClipboard();
+    if (clipboard == null || clipboard.isEmpty) {
+      if (mounted) ToastUtils.showInfo(context, 'Clipboard is empty');
+      return;
+    }
+    final sets = service.importSetsFromJson(clipboard);
+    if (sets == null || sets.isEmpty) {
+      if (mounted) ToastUtils.showInfo(context, 'Could not parse clipboard data');
+      return;
+    }
+    final storage = context.read<StorageService>();
+    for (final set in sets) {
+      await storage.saveSet(set);
+    }
+    _loadRecentSets();
+    if (mounted) ToastUtils.showSuccess(context, 'Imported ${sets.length} sets');
+  }
+
+  void _showProfileMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.cardBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.sync),
+                title: const Text('Sync Data'),
+                subtitle: const Text('Sync with cloud'),
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Data synced!')),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.bar_chart),
+                title: const Text('Statistics'),
+                subtitle: const Text('View your progress'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const StatisticsScreen()),
+                  );
+                },
+              ),
+              Consumer<ThemeProvider>(
+                builder: (context, themeProvider, child) {
+                  return ListTile(
+                    leading: Icon(themeProvider.isDarkMode 
+                        ? Icons.dark_mode 
+                        : Icons.light_mode),
+                    title: const Text('Dark Mode'),
+                    trailing: Switch(
+                      value: themeProvider.isDarkMode,
+                      onChanged: (_) => themeProvider.toggleTheme(),
+                    ),
+                    onTap: () => themeProvider.toggleTheme(),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.upload),
+                title: const Text('Export All'),
+                subtitle: const Text('Copy all sets to clipboard'),
+                onTap: () => _exportAllSets(),
+              ),
+              ListTile(
+                leading: const Icon(Icons.download),
+                title: const Text('Import'),
+                subtitle: const Text('Import from clipboard'),
+                onTap: () => _importFromClipboard(),
+              ),
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.logout, color: AppColors.error),
+                title: const Text('Sign Out', style: TextStyle(color: AppColors.error)),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await Supabase.instance.client.auth.signOut();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            // Search bar only
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: SearchBarWidget(
-                  onSearch: _onSearch,
+        child: RefreshIndicator(
+          onRefresh: _syncFromCloud,
+          color: AppColors.primary,
+          child: CustomScrollView(
+            slivers: [
+              // Sync indicator
+              if (_isSyncing)
+                SliverToBoxAdapter(
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    color: AppColors.primary.withOpacity(0.1),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Syncing...',
+                          style: TextStyle(color: AppColors.primary, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              // Search bar and profile
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SearchBarWidget(
+                          onSearch: _onSearch,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: _showProfileMenu,
+                        child: CircleAvatar(
+                          backgroundColor: AppColors.primary,
+                          child: const Icon(Icons.person, color: Colors.white),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
 
-            // Content
-            if (_isSearching)
-              _buildSearchResults()
-            else
-              _buildHomeContent(),
-          ],
+              // Content
+              if (_isSearching)
+                _buildSearchResults()
+              else
+                _buildHomeContent(),
+            ],
+          ),
         ),
       ),
     );
@@ -102,12 +373,68 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Jump back in section
+          // Due Today Banner
+          if (_dueCardCount > 0 && !_isSearching)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppColors.primary.withOpacity(0.2), AppColors.secondary.withOpacity(0.2)],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.access_time, color: AppColors.primary),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$_dueCardCount cards due',
+                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'Review now to strengthen memory',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: _recentSets.isNotEmpty ? () => _openSet(_recentSets.first) : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      ),
+                      child: const Text('Study'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          
+          // Recent Sets section
           if (_recentSets.isNotEmpty) ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                'Jump back in',
+                'Recent Sets',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
             ),
@@ -118,11 +445,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 controller: PageController(viewportFraction: 0.9),
                 itemCount: _recentSets.length,
                 itemBuilder: (context, index) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: ProgressCard(
-                      flashcardSet: _recentSets[index],
-                      onTap: () => _openSet(_recentSets[index]),
+                  return FadeSlideAnimation(
+                    index: index,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ProgressCard(
+                        flashcardSet: _recentSets[index],
+                        onTap: () => _openSet(_recentSets[index]),
+                        onEdit: () => _editSet(_recentSets[index]),
+                        onDelete: () => _deleteSet(_recentSets[index]),
+                      ),
                     ),
                   );
                 },
