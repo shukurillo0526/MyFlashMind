@@ -33,6 +33,13 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   List<Flashcard> _knowCards = [];
   List<Flashcard> _learningCards = [];
 
+  // Settings
+  bool _trackProgress = true;
+  bool _studyStarredOnly = false;
+  bool _showFrontFirst = true;  // true = Term (Korean), false = Definition
+  bool _showBothSides = false;
+  bool _textToSpeech = false;
+
   @override
   void initState() {
     super.initState();
@@ -44,9 +51,32 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     if (set != null) {
       setState(() {
         _set = set;
-        _cards = List.from(set.cards);
+        _applySettings();
       });
     }
+  }
+
+  void _applySettings() {
+    if (_set == null) return;
+    
+    var cards = List<Flashcard>.from(_set!.cards);
+    
+    // Apply starred filter
+    if (_studyStarredOnly) {
+      cards = cards.where((c) => c.isStarred).toList();
+    }
+    
+    // If no cards after filter, show all
+    if (cards.isEmpty) {
+      cards = List<Flashcard>.from(_set!.cards);
+    }
+    
+    _cards = cards;
+    _currentIndex = 0;
+    _showingFront = true;
+    _isComplete = false;
+    _knowCards = [];
+    _learningCards = [];
   }
 
   void _flipCard() {
@@ -149,6 +179,198 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     });
   }
 
+  void _showOptionsModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Options',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                
+                // Track progress
+                _buildOptionRow(
+                  'Track progress',
+                  _trackProgress,
+                  (v) => setState(() => _trackProgress = v),
+                  description: 'Sort your flashcards to keep track of what you know and what you\'re still learning.',
+                ),
+                const SizedBox(height: 16),
+                
+                // Study only starred terms
+                _buildOptionRow(
+                  'Study only starred terms',
+                  _studyStarredOnly,
+                  (v) {
+                    setState(() => _studyStarredOnly = v);
+                    _applySettings();
+                  },
+                ),
+                const SizedBox(height: 16),
+                
+                // Front dropdown
+                Row(
+                  children: [
+                    const Expanded(child: Text('Front')),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: DropdownButton<bool>(
+                        value: _showFrontFirst,
+                        dropdownColor: AppColors.primary,
+                        underline: const SizedBox(),
+                        isDense: true,
+                        style: const TextStyle(color: Colors.white),
+                        iconEnabledColor: Colors.white,
+                        items: const [
+                          DropdownMenuItem(value: true, child: Text('Korean')),
+                          DropdownMenuItem(value: false, child: Text('English')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() => _showFrontFirst = v);
+                            Navigator.pop(context);
+                            _showOptionsModal();
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                
+                // Show both sides
+                _buildOptionRow(
+                  'Show both sides of cards',
+                  _showBothSides,
+                  (v) => setState(() => _showBothSides = v),
+                ),
+                const SizedBox(height: 24),
+                const Divider(),
+                
+                // Keyboard shortcuts section
+                ExpansionTile(
+                  title: const Text('Keyboard shortcuts'),
+                  children: [
+                    _buildShortcutRow('Know', '→'),
+                    _buildShortcutRow('Still learning', '←'),
+                    _buildShortcutRow('Flip', 'Space'),
+                    _buildShortcutRow('Star', 'S'),
+                    _buildShortcutRow('Shuffle', 'H'),
+                    _buildShortcutRow('Audio', 'A'),
+                  ],
+                ),
+                const Divider(),
+                
+                // Text to speech
+                _buildOptionRow(
+                  'Text to speech',
+                  _textToSpeech,
+                  (v) => setState(() => _textToSpeech = v),
+                ),
+                const SizedBox(height: 16),
+                
+                // Restart Flashcards
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _restart();
+                  },
+                  child: const Text('Restart Flashcards', style: TextStyle(color: AppColors.error)),
+                ),
+                
+                // Privacy Policy
+                TextButton(
+                  onPressed: () {},
+                  child: const Text('Privacy Policy', style: TextStyle(color: AppColors.primary)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOptionRow(String label, bool value, Function(bool) onChanged, {String? description}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(child: Text(label)),
+            Switch(
+              value: value,
+              onChanged: (v) {
+                onChanged(v);
+                Navigator.pop(context);
+                _showOptionsModal();
+              },
+            ),
+          ],
+        ),
+        if (description != null)
+          Padding(
+            padding: const EdgeInsets.only(right: 60),
+            child: Text(
+              description,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildShortcutRow(String label, String key) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              border: Border.all(color: AppColors.textSecondary),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(key, style: const TextStyle(fontFamily: 'monospace')),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_set == null) {
@@ -171,7 +393,7 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
           ),
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () {},
+            onPressed: _showOptionsModal,
           ),
         ],
       ),
@@ -292,25 +514,33 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                       ),
                       child: Stack(
                         children: [
-                          // Side indicator
+                          // Side indicator - wrapped in counter-rotation transform
                           Positioned(
                             top: 16,
                             left: 16,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: _showingFront 
-                                    ? AppColors.primary.withOpacity(0.2)
-                                    : AppColors.secondary.withOpacity(0.2),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text(
-                                _showingFront ? 'TERM' : 'DEFINITION',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: _showingFront ? AppColors.primary : AppColors.secondary,
-                                  letterSpacing: 1,
+                            right: 16,
+                            child: Transform(
+                              alignment: Alignment.center,
+                              transform: Matrix4.identity()..rotateY(value >= 0.5 ? math.pi : 0),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: isFrontVisible 
+                                        ? AppColors.primary.withOpacity(0.2)
+                                        : AppColors.secondary.withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    isFrontVisible ? 'TERM' : 'DEFINITION',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: isFrontVisible ? AppColors.primary : AppColors.secondary,
+                                      letterSpacing: 1,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -350,21 +580,26 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                               ),
                             ),
                           ),
+                          // Tap to flip hint - wrapped in counter-rotation transform
                           Positioned(
                             bottom: 16,
                             left: 0,
                             right: 0,
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.touch_app, size: 16, color: AppColors.textSecondary),
-                                const SizedBox(width: 4),
-                                Text(
-                                  'Tap to flip',
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
+                            child: Transform(
+                              alignment: Alignment.center,
+                              transform: Matrix4.identity()..rotateY(value >= 0.5 ? math.pi : 0),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.touch_app, size: 16, color: AppColors.textSecondary),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Tap to flip',
+                                    style: Theme.of(context).textTheme.bodySmall,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ],

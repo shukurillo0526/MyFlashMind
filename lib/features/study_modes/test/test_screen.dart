@@ -13,7 +13,7 @@ class TestScreen extends StatefulWidget {
   final int questionCount;
   final bool instantFeedback;
   final bool shuffleTerms;
-  final bool answerWithTerm;
+  final String answerMode; // 'term', 'definition', or 'both'
   final bool includeTrueFalse;
   final bool includeMultipleChoice;
   final bool includeWritten;
@@ -24,7 +24,7 @@ class TestScreen extends StatefulWidget {
     required this.questionCount,
     required this.instantFeedback,
     required this.shuffleTerms,
-    required this.answerWithTerm,
+    required this.answerMode,
     required this.includeTrueFalse,
     required this.includeMultipleChoice,
     required this.includeWritten,
@@ -81,8 +81,17 @@ class _TestScreenState extends State<TestScreen> {
     
     for (final card in selectedCards) {
       final type = types[_random.nextInt(types.length)];
-      final prompt = widget.answerWithTerm ? card.definition : card.term;
-      final correctAnswer = widget.answerWithTerm ? card.term : card.definition;
+      
+      // Determine answer direction based on answerMode
+      bool answerWithTerm;
+      if (widget.answerMode == 'both') {
+        answerWithTerm = _random.nextBool(); // Randomly choose for each question
+      } else {
+        answerWithTerm = widget.answerMode == 'term';
+      }
+      
+      final prompt = answerWithTerm ? card.definition : card.term;
+      final correctAnswer = answerWithTerm ? card.term : card.definition;
       
       List<String>? choices;
       bool? trueFalseStatement;
@@ -92,7 +101,7 @@ class _TestScreenState extends State<TestScreen> {
         final otherCards = set.cards.where((c) => c.id != card.id).toList()..shuffle();
         choices = [correctAnswer];
         for (int i = 0; i < 3 && i < otherCards.length; i++) {
-          choices.add(widget.answerWithTerm
+          choices.add(answerWithTerm
               ? otherCards[i].term
               : otherCards[i].definition);
         }
@@ -104,7 +113,7 @@ class _TestScreenState extends State<TestScreen> {
         } else {
           final otherCards = set.cards.where((c) => c.id != card.id).toList()..shuffle();
           if (otherCards.isNotEmpty) {
-            displayedAnswer = widget.answerWithTerm
+            displayedAnswer = answerWithTerm
                 ? otherCards.first.term
                 : otherCards.first.definition;
           } else {

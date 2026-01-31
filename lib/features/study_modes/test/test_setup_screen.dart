@@ -22,7 +22,7 @@ class _TestSetupScreenState extends State<TestSetupScreen> {
   int _questionCount = 10;
   bool _instantFeedback = true;
   bool _shuffleTerms = true;
-  bool _answerWithTerm = false;
+  _AnswerMode _answerMode = _AnswerMode.definition;
   
   // Question types
   bool _trueFalse = false;
@@ -55,7 +55,7 @@ class _TestSetupScreenState extends State<TestSetupScreen> {
           questionCount: _questionCount,
           instantFeedback: _instantFeedback,
           shuffleTerms: _shuffleTerms,
-          answerWithTerm: _answerWithTerm,
+          answerMode: _answerMode.name,  // Pass as string
           includeTrueFalse: _trueFalse,
           includeMultipleChoice: _multipleChoice,
           includeWritten: _written,
@@ -145,15 +145,18 @@ class _TestSetupScreenState extends State<TestSetupScreen> {
             const SizedBox(height: 12),
 
             // Answer with
-            _buildOptionRow(
-              'Answer with',
-              subtitle: _answerWithTerm ? 'Term' : 'Definition',
-              trailing: IconButton(
-                icon: const Icon(Icons.arrow_drop_down),
-                onPressed: () {
-                  setState(() => _answerWithTerm = !_answerWithTerm);
-                },
-              ),
+            Text('Answer with', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            SegmentedButton<_AnswerMode>(
+              segments: const [
+                ButtonSegment(value: _AnswerMode.term, label: Text('Term')),
+                ButtonSegment(value: _AnswerMode.definition, label: Text('Definition')),
+                ButtonSegment(value: _AnswerMode.both, label: Text('Both')),
+              ],
+              selected: {_answerMode},
+              onSelectionChanged: (Set<_AnswerMode> newSelection) {
+                setState(() => _answerMode = newSelection.first);
+              },
             ),
 
             const SizedBox(height: 24),
@@ -261,4 +264,11 @@ class _TestSetupScreenState extends State<TestSetupScreen> {
       );
     }).toList();
   }
+}
+
+/// Answer mode for test questions
+enum _AnswerMode {
+  term,
+  definition,
+  both,
 }

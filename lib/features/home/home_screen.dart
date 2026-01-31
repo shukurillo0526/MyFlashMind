@@ -221,9 +221,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showProfileMenu() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.cardBackground,
+      backgroundColor: theme.cardTheme.color ?? theme.cardColor,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -234,9 +237,9 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: const Icon(Icons.sync),
-                title: const Text('Sync Data'),
-                subtitle: const Text('Sync with cloud'),
+                leading: Icon(Icons.sync, color: theme.iconTheme.color),
+                title: Text('Sync Data', style: TextStyle(color: theme.colorScheme.onSurface)),
+                subtitle: Text('Sync with cloud', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6))),
                 onTap: () {
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -245,9 +248,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.bar_chart),
-                title: const Text('Statistics'),
-                subtitle: const Text('View your progress'),
+                leading: Icon(Icons.bar_chart, color: theme.iconTheme.color),
+                title: Text('Statistics', style: TextStyle(color: theme.colorScheme.onSurface)),
+                subtitle: Text('View your progress', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6))),
                 onTap: () {
                   Navigator.pop(context);
                   Navigator.push(
@@ -261,8 +264,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   return ListTile(
                     leading: Icon(themeProvider.isDarkMode 
                         ? Icons.dark_mode 
-                        : Icons.light_mode),
-                    title: const Text('Dark Mode'),
+                        : Icons.light_mode,
+                        color: theme.iconTheme.color),
+                    title: Text('Dark Mode', style: TextStyle(color: theme.colorScheme.onSurface)),
                     trailing: Switch(
                       value: themeProvider.isDarkMode,
                       onChanged: (_) => themeProvider.toggleTheme(),
@@ -272,15 +276,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.upload),
-                title: const Text('Export All'),
-                subtitle: const Text('Copy all sets to clipboard'),
+                leading: Icon(Icons.upload, color: theme.iconTheme.color),
+                title: Text('Export All', style: TextStyle(color: theme.colorScheme.onSurface)),
+                subtitle: Text('Copy all sets to clipboard', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6))),
                 onTap: () => _exportAllSets(),
               ),
               ListTile(
-                leading: const Icon(Icons.download),
-                title: const Text('Import'),
-                subtitle: const Text('Import from clipboard'),
+                leading: Icon(Icons.download, color: theme.iconTheme.color),
+                title: Text('Import', style: TextStyle(color: theme.colorScheme.onSurface)),
+                subtitle: Text('Import from clipboard', style: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6))),
                 onTap: () => _importFromClipboard(),
               ),
               const Divider(),

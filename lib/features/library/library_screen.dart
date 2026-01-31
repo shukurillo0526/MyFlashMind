@@ -30,6 +30,7 @@ class _LibraryScreenState extends State<LibraryScreen>
   List<FlashcardSet> _filteredSets = [];
   List<Folder> _filteredFolders = [];
   String _searchQuery = '';
+  _SortMode _sortMode = _SortMode.recent;
 
   @override
   void initState() {
@@ -64,7 +65,7 @@ class _LibraryScreenState extends State<LibraryScreen>
 
   void _applySearch() {
     if (_searchQuery.isEmpty) {
-      _filteredSets = _sets;
+      _filteredSets = List.from(_sets);
       _filteredFolders = _folders;
     } else {
       final query = _searchQuery.toLowerCase();
@@ -75,6 +76,19 @@ class _LibraryScreenState extends State<LibraryScreen>
       _filteredFolders = _folders.where((f) => 
         f.name.toLowerCase().contains(query)
       ).toList();
+    }
+    
+    // Apply sorting
+    switch (_sortMode) {
+      case _SortMode.recent:
+        _filteredSets.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+        break;
+      case _SortMode.title:
+        _filteredSets.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+        break;
+      case _SortMode.created:
+        _filteredSets.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        break;
     }
   }
 
@@ -364,34 +378,61 @@ class _LibraryScreenState extends State<LibraryScreen>
       );
     }
 
-    // Group sets by month
-    final grouped = <String, List<FlashcardSet>>{};
-    for (final set in _filteredSets) {
-      final label = _getDateGroupLabel(set.createdAt);
-      grouped.putIfAbsent(label, () => []).add(set);
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      itemCount: grouped.length,
-      itemBuilder: (context, index) {
-        final label = grouped.keys.elementAt(index);
-        final sets = grouped[label]!;
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Text(
-                label,
-                style: Theme.of(context).textTheme.bodyMedium,
+    return Column(
+      children: [
+        // Sort selector dropdown
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Text('Sort by:', style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButton<_SortMode>(
+                  value: _sortMode,
+                  underline: const SizedBox(),
+                  isDense: true,
+                  dropdownColor: AppColors.cardBackground,
+                  icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+                  style: TextStyle(
+                    color: Theme.of(context).textTheme.bodyMedium?.color,
+                    fontSize: 14,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: _SortMode.recent, child: Text('Recent')),
+                    DropdownMenuItem(value: _SortMode.title, child: Text('Title')),
+                    DropdownMenuItem(value: _SortMode.created, child: Text('Created')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) {
+                      setState(() {
+                        _sortMode = value;
+                        _applySearch();
+                      });
+                    }
+                  },
+                ),
               ),
-            ),
-            ...sets.map((set) => _buildSetTile(set)),
-          ],
-        );
-      },
+            ],
+          ),
+        ),
+        
+        // Sets list
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: _filteredSets.length,
+            itemBuilder: (context, index) {
+              return _buildSetTile(_filteredSets[index]);
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -459,11 +500,16 @@ class _LibraryScreenState extends State<LibraryScreen>
       );
     }
 
+    final storage = context.read<StorageService>();
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: _filteredFolders.length,
       itemBuilder: (context, index) {
         final folder = _filteredFolders[index];
+        // Dynamically compute set count
+        final setCount = storage.getSetsInFolder(folder.id).length;
+        
         return Dismissible(
           key: Key(folder.id),
           direction: DismissDirection.endToStart,
@@ -487,7 +533,7 @@ class _LibraryScreenState extends State<LibraryScreen>
               child: const Icon(Icons.folder, color: AppColors.textSecondary),
             ),
             title: Text(folder.name),
-            subtitle: Text('${folder.setCount} sets'),
+            subtitle: Text('$setCount sets'),
           ),
         );
       },
@@ -529,4 +575,11 @@ class _LibraryScreenState extends State<LibraryScreen>
       ),
     );
   }
+}
+
+/// Sort modes for library sets
+enum _SortMode {
+  recent,
+  title,
+  created,
 }

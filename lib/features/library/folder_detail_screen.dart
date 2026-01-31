@@ -21,6 +21,7 @@ class FolderDetailScreen extends StatefulWidget {
 class _FolderDetailScreenState extends State<FolderDetailScreen> {
   Folder? _folder;
   List<FlashcardSet> _sets = [];
+  _SortMode _sortMode = _SortMode.recent;
 
   @override
   void initState() {
@@ -35,7 +36,22 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
       setState(() {
         _folder = folder;
         _sets = storage.getSetsInFolder(widget.folderId);
+        _applySorting();
       });
+    }
+  }
+
+  void _applySorting() {
+    switch (_sortMode) {
+      case _SortMode.recent:
+        _sets.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+        break;
+      case _SortMode.title:
+        _sets.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+        break;
+      case _SortMode.created:
+        _sets.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        break;
     }
   }
 
@@ -48,9 +64,6 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
   }
 
   void _createNewSet() {
-    // Pass folder ID to create screen so it's pre-selected
-    // Assuming CreateSetScreen can handle pre-selecting a folder if we pass it
-    // For now, we rely on the user selecting it, or we simply refresh detailed view
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const CreateSetScreen(), 
@@ -163,41 +176,97 @@ class _FolderDetailScreenState extends State<FolderDetailScreen> {
                 ],
               ),
             )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _sets.length,
-              itemBuilder: (context, index) {
-                final set = _sets[index];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: ListTile(
-                    onTap: () => _openSet(set),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    tileColor: AppColors.cardBackground,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    leading: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(8),
+          : Column(
+              children: [
+                // Sort selector dropdown
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    children: [
+                      Text('Sort by:', style: Theme.of(context).textTheme.bodySmall),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: DropdownButton<_SortMode>(
+                          value: _sortMode,
+                          underline: const SizedBox(),
+                          isDense: true,
+                          dropdownColor: AppColors.cardBackground,
+                          icon: const Icon(Icons.arrow_drop_down, color: AppColors.textSecondary),
+                          style: TextStyle(
+                            color: Theme.of(context).textTheme.bodyMedium?.color,
+                            fontSize: 14,
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: _SortMode.recent, child: Text('Recent')),
+                            DropdownMenuItem(value: _SortMode.title, child: Text('Title')),
+                            DropdownMenuItem(value: _SortMode.created, child: Text('Created')),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() {
+                                _sortMode = value;
+                                _applySorting();
+                              });
+                            }
+                          },
+                        ),
                       ),
-                      child: const Icon(Icons.style, color: AppColors.primary),
-                    ),
-                    title: Text(
-                      set.title,
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    subtitle: Text(
-                      '${set.termCount} terms',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
+                    ],
                   ),
-                );
-              },
+                ),
+                
+                // Sets list
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _sets.length,
+                    itemBuilder: (context, index) {
+                      final set = _sets[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: ListTile(
+                          onTap: () => _openSet(set),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          tileColor: AppColors.cardBackground,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          leading: Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.style, color: AppColors.primary),
+                          ),
+                          title: Text(
+                            set.title,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          subtitle: Text(
+                            '${set.termCount} terms',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
     );
   }
+}
+
+/// Sort modes for folder sets
+enum _SortMode {
+  recent,
+  title,
+  created,
 }

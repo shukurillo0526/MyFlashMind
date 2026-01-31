@@ -39,6 +39,16 @@ class _LearnScreenState extends State<LearnScreen> {
   int _incorrectCount = 0;
   final Random _random = Random();
 
+  // Settings
+  bool _shuffle = true;
+  bool _studyStarred = false;
+  bool _soundEffects = false;
+  bool _multipleChoice = true;
+  bool _written = true;
+  bool _flashcardMode = false;
+  bool _answerWithKorean = true;
+  bool _textToSpeech = false;
+
   @override
   void initState() {
     super.initState();
@@ -153,6 +163,158 @@ class _LearnScreenState extends State<LearnScreen> {
     await context.read<SupabaseService>().saveSet(_set!);
   }
 
+  void _overrideAsCorrect() {
+    if (_currentIndex >= _cards.length) return;
+    final card = _cards[_currentIndex];
+    
+    setState(() {
+      // Undo incorrect count
+      _incorrectCount--;
+      card.timesIncorrect--;
+      
+      // Add correct count
+      _correctCount++;
+      card.timesCorrect++;
+    });
+    
+    _nextQuestion();
+  }
+
+  void _showOptionsModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.5,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Options',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                
+                // Toggle chips row
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    _buildToggleChip('Shuffle', _shuffle, (v) => setState(() => _shuffle = v)),
+                    _buildToggleChip('Study starred', _studyStarred, (v) => setState(() => _studyStarred = v)),
+                    _buildToggleChip('Sound effects', _soundEffects, (v) => setState(() => _soundEffects = v)),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                
+                // Question types
+                Text('Question types', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: AppColors.error)),
+                const SizedBox(height: 12),
+                _buildOptionRow('Multiple choice', Icons.list, _multipleChoice, (v) => setState(() => _multipleChoice = v)),
+                _buildOptionRow('Written', Icons.edit, _written, (v) => setState(() => _written = v)),
+                _buildOptionRow('Flashcards', Icons.style, _flashcardMode, (v) => setState(() => _flashcardMode = v)),
+                
+                const SizedBox(height: 24),
+                
+                // Answer with
+                Text('Answer with', style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: 12),
+                _buildOptionRow('Korean', null, _answerWithKorean, (v) => setState(() => _answerWithKorean = v)),
+                _buildOptionRow('English', null, !_answerWithKorean, (v) => setState(() => _answerWithKorean = !v)),
+                
+                const SizedBox(height: 24),
+                
+                // Text to speech
+                _buildOptionRow('Text to speech', Icons.volume_up, _textToSpeech, (v) => setState(() => _textToSpeech = v)),
+                
+                const SizedBox(height: 24),
+                const Divider(),
+                
+                // Restart Learn
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    setState(() {
+                      _currentIndex = 0;
+                      _correctCount = 0;
+                      _incorrectCount = 0;
+                      _isComplete = false;
+                    });
+                    _generateQuestion();
+                  },
+                  child: const Text('Restart Learn', style: TextStyle(color: AppColors.error)),
+                ),
+                
+                // Privacy Policy
+                TextButton(
+                  onPressed: () {},
+                  child: const Text('Privacy Policy', style: TextStyle(color: AppColors.primary)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToggleChip(String label, bool value, Function(bool) onChanged) {
+    return FilterChip(
+      label: Text(label),
+      selected: value,
+      onSelected: (v) {
+        onChanged(v);
+        Navigator.pop(context);
+        _showOptionsModal();
+      },
+      selectedColor: AppColors.primary.withOpacity(0.2),
+      checkmarkColor: AppColors.primary,
+    );
+  }
+
+  Widget _buildOptionRow(String label, IconData? icon, bool value, Function(bool) onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 20, color: AppColors.textSecondary),
+            const SizedBox(width: 12),
+          ],
+          Expanded(child: Text(label)),
+          Switch(
+            value: value,
+            onChanged: (v) {
+              onChanged(v);
+              Navigator.pop(context);
+              _showOptionsModal();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_set == null) {
@@ -171,6 +333,12 @@ class _LearnScreenState extends State<LearnScreen> {
           },
         ),
         title: Text('${_currentIndex + 1} / ${_cards.length}'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: _showOptionsModal,
+          ),
+        ],
       ),
       body: _isComplete ? _buildCompleteView() : _buildQuestionView(),
     );
@@ -396,6 +564,18 @@ class _LearnScreenState extends State<LearnScreen> {
               child: const Text('Continue'),
             ),
           ),
+          // Override button for incorrect answers
+          if (!isCorrect)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: TextButton(
+                onPressed: _overrideAsCorrect,
+                child: const Text(
+                  'Override: I was correct',
+                  style: TextStyle(color: AppColors.error),
+                ),
+              ),
+            ),
         ] else
           SizedBox(
             width: double.infinity,
