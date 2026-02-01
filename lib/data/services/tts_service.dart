@@ -30,8 +30,8 @@ class TtsService {
 
   /// Speak the given text
   /// Automatically detects language (Korean or English)
-  Future<void> speak(String text, {String? language}) async {
-    if (!_enabled) return;
+  Future<void> speak(String text, {String? language, bool force = false}) async {
+    if (!_enabled && !force) return;
     if (!_initialized) await init();
 
     try {

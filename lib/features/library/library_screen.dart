@@ -18,11 +18,11 @@ class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key, this.onNavigateToCreate});
 
   @override
-  State<LibraryScreen> createState() => _LibraryScreenState();
+  State<LibraryScreen> createState() => LibraryScreenState();
 }
 
-class _LibraryScreenState extends State<LibraryScreen>
-    with SingleTickerProviderStateMixin {
+class LibraryScreenState extends State<LibraryScreen>
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
   late TabController _tabController;
   final _searchController = TextEditingController();
   List<FlashcardSet> _sets = [];
@@ -31,11 +31,16 @@ class _LibraryScreenState extends State<LibraryScreen>
   List<Folder> _filteredFolders = [];
   String _searchQuery = '';
   _SortMode _sortMode = _SortMode.recent;
+  bool _isLoaded = false;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    // Load data after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadData();
     });
@@ -47,12 +52,20 @@ class _LibraryScreenState extends State<LibraryScreen>
     _searchController.dispose();
     super.dispose();
   }
+  
+  /// Public method to reload data (called when tab becomes active)
+  void reloadData() {
+    if (mounted) {
+      _loadData();
+    }
+  }
 
   void _loadData() {
     final storage = context.read<StorageService>();
     setState(() {
       _sets = storage.getAllSets();
       _folders = storage.getAllFolders();
+      _isLoaded = true;
       _applySearch();
     });
   }

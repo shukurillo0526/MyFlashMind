@@ -48,18 +48,17 @@ class _LearnScreenState extends State<LearnScreen> {
   bool _shuffle = true;
   bool _textToSpeech = false;
   
-  // Settings - Prompt with (what shows as the question)
-  bool _promptWithKorean = true;  // Term
-  bool _promptWithEnglish = true; // Definition
-  
   // Settings - Answer with (what you need to provide)
-  bool _answerWithKorean = true;  // Term
-  bool _answerWithEnglish = true; // Definition
+  _AnswerMode _answerMode = _AnswerMode.both;
+  List<bool> _answerWithTermList = []; // true = Answer is Korean (Term), Prompt is English
   
   // Settings - Question types
   bool _flashcardMode = false;
   bool _multipleChoice = true;
   bool _written = true;
+  
+  // Flashcard specific state
+  bool _flashcardRevealed = false;
   
   // Settings - Grading
   _GradingMode _gradingMode = _GradingMode.relaxed;
@@ -83,10 +82,41 @@ class _LearnScreenState extends State<LearnScreen> {
       setState(() {
         _set = set;
         // Prioritize cards with lower accuracy
+        // Prioritize cards with lower accuracy
         _cards = List.from(set.cards)
           ..sort((a, b) => a.accuracy.compareTo(b.accuracy));
+        
+        // Shuffle if enabled
+        if (_shuffle) {
+          _cards.shuffle();
+        }
+
+        _distributeDirections();
       });
       _generateQuestion();
+    }
+  }
+  
+  void _distributeDirections() {
+    if (_cards.isEmpty) return;
+    
+    if (_answerMode == _AnswerMode.both) {
+      // 50/50 split
+      final half = (_cards.length / 2).ceil();
+      _answerWithTermList = [
+        ...List.filled(half, true),
+        ...List.filled(_cards.length - half, false),
+      ];
+      // Shuffle directions to match cards randomness or just randomized distribution
+      _answerWithTermList.shuffle();
+      // Ensure specific length match if odd
+      if (_answerWithTermList.length > _cards.length) {
+        _answerWithTermList = _answerWithTermList.sublist(0, _cards.length);
+      }
+    } else if (_answerMode == _AnswerMode.korean) {
+      _answerWithTermList = List.filled(_cards.length, true);
+    } else {
+      _answerWithTermList = List.filled(_cards.length, false);
     }
   }
 
@@ -98,24 +128,19 @@ class _LearnScreenState extends State<LearnScreen> {
 
     final card = _cards[_currentIndex];
     
-    // Determine question direction based on settings
-    // If both prompt options are enabled, randomly choose
-    // If only one is enabled, use that direction
-    if (_promptWithKorean && _promptWithEnglish) {
-      _currentAnswerWithTerm = _random.nextBool();
-    } else if (_promptWithKorean) {
-      // Prompt is Korean (term), so answer with English (definition)
-      _currentAnswerWithTerm = false;
+    // Determine answer direction from pre-calculated list
+    // If we ran out of bounds (shouldn't happen), default to first option
+    if (_currentIndex >= _answerWithTermList.length) {
+      _currentAnswerWithTerm = _answerMode != _AnswerMode.english; 
     } else {
-      // Prompt is English (definition), so answer with Korean (term)
-      _currentAnswerWithTerm = true;
+      _currentAnswerWithTerm = _answerWithTermList[_currentIndex];
     }
     
     // Randomly choose question type from enabled types
     final availableTypes = <_QuestionType>[];
+    if (_flashcardMode) availableTypes.add(_QuestionType.flashcard);
     if (_multipleChoice) availableTypes.add(_QuestionType.multipleChoice);
     if (_written) availableTypes.add(_QuestionType.written);
-    if (_flashcardMode) availableTypes.add(_QuestionType.flashcard);
     
     if (availableTypes.isEmpty) {
       availableTypes.add(_QuestionType.multipleChoice);
@@ -123,11 +148,11 @@ class _LearnScreenState extends State<LearnScreen> {
     
     _questionType = availableTypes[_random.nextInt(availableTypes.length)];
     
-    // Get correct answer based on direction
-    final correctAnswer = _currentAnswerWithTerm ? card.term : card.definition;
+    // For Flashcard type, we don't generate choices, just show front
     
     // Generate multiple choice options
     if (_questionType == _QuestionType.multipleChoice) {
+      final correctAnswer = _currentAnswerWithTerm ? card.term : card.definition;
       final otherCards = _set!.cards.where((c) => c.id != card.id).toList()
         ..shuffle();
       
@@ -142,6 +167,8 @@ class _LearnScreenState extends State<LearnScreen> {
     }
     
     // Speak the prompt if TTS is enabled
+    // Prompt is OPPOSITE of Answer
+    // If AnswerWithTerm (Korean), Prompt is Definition (English)
     if (_textToSpeech) {
       final prompt = _currentAnswerWithTerm ? card.definition : card.term;
       context.read<TtsService>().speak(prompt);
@@ -152,6 +179,7 @@ class _LearnScreenState extends State<LearnScreen> {
       _showResult = false;
       _writtenAnswer = '';
       _answerController.clear();
+      _flashcardRevealed = false;
     });
   }
 
@@ -174,6 +202,25 @@ class _LearnScreenState extends State<LearnScreen> {
       }
       card.lastStudied = DateTime.now();
     });
+  }
+
+  void _handleFlashcardResult(bool correct) {
+    if (_currentIndex >= _cards.length) return;
+    
+    final card = _cards[_currentIndex];
+    
+    setState(() {
+      if (correct) {
+        _correctCount++;
+        card.timesCorrect++;
+      } else {
+        _incorrectCount++;
+        card.timesIncorrect++;
+      }
+      card.lastStudied = DateTime.now();
+    });
+    
+    _nextQuestion();
   }
 
   bool _isAnswerCorrect(String answer, String correct) {
@@ -317,44 +364,44 @@ class _LearnScreenState extends State<LearnScreen> {
                 const Divider(),
                 const SizedBox(height: 16),
                 
-                // Prompt with section
-                Text('Prompt with', style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: AppColors.textSecondary,
-                )),
-                const SizedBox(height: 8),
-                Text('Select what appears as the question', 
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
-                const SizedBox(height: 12),
-                _buildOptionRow('Korean (Term)', null, _promptWithKorean, (v) {
-                  // Ensure at least one is selected
-                  if (!v && !_promptWithEnglish) return;
-                  setState(() => _promptWithKorean = v);
-                }),
-                _buildOptionRow('English (Definition)', null, _promptWithEnglish, (v) {
-                  if (!v && !_promptWithKorean) return;
-                  setState(() => _promptWithEnglish = v);
-                }),
-                
-                const SizedBox(height: 24),
-                const Divider(),
-                const SizedBox(height: 16),
-                
                 // Answer with section
                 Text('Answer with', style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: AppColors.textSecondary,
                 )),
                 const SizedBox(height: 8),
-                Text('Select what you need to provide as the answer', 
+                Text('Select what you need to provide as the answer (Prompt will be the opposite)', 
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
                 const SizedBox(height: 12),
-                _buildOptionRow('Korean (Term)', null, _answerWithKorean, (v) {
-                  if (!v && !_answerWithEnglish) return;
-                  setState(() => _answerWithKorean = v);
-                }),
-                _buildOptionRow('English (Definition)', null, _answerWithEnglish, (v) {
-                  if (!v && !_answerWithKorean) return;
-                  setState(() => _answerWithEnglish = v);
-                }),
+                
+                DropdownButtonFormField<_AnswerMode>(
+                  value: _answerMode,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: _AnswerMode.korean, 
+                      child: Text('Korean (Term)'),
+                    ),
+                    DropdownMenuItem(
+                      value: _AnswerMode.english, 
+                      child: Text('English (Definition)'),
+                    ),
+                    DropdownMenuItem(
+                      value: _AnswerMode.both, 
+                      child: Text('Both (Mixed)'),
+                    ),
+                  ],
+                  onChanged: (v) {
+                    if(v != null) {
+                      setState(() => _answerMode = v);
+                      _distributeDirections();
+                      Navigator.pop(context);
+                      _showOptionsModal();
+                    }
+                  }
+                ),
                 
                 const SizedBox(height: 24),
                 const Divider(),
@@ -538,6 +585,15 @@ class _LearnScreenState extends State<LearnScreen> {
     }
 
     final card = _cards[_currentIndex];
+    
+    // Choose View based on Type
+    if (_questionType == _QuestionType.flashcard) {
+      return _buildFlashcardQuestion(card);
+    }
+    
+    // Prompt depends on direction (Prompt is OPPOSITE of Answer)
+    // If AnswerWithTerm (Korean), Prompt is Definition (English)
+    final promptText = _currentAnswerWithTerm ? card.definition : card.term;
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -556,7 +612,7 @@ class _LearnScreenState extends State<LearnScreen> {
           ),
           const SizedBox(height: 24),
 
-          // Term (question)
+          // Question Card (Term/Def)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(24),
@@ -567,7 +623,7 @@ class _LearnScreenState extends State<LearnScreen> {
             child: Column(
               children: [
                 Text(
-                  card.term,
+                  promptText,
                   style: Theme.of(context).textTheme.headlineMedium,
                   textAlign: TextAlign.center,
                 ),
@@ -589,6 +645,152 @@ class _LearnScreenState extends State<LearnScreen> {
                 ? _buildWrittenAnswer(card)
                 : _buildMultipleChoice(card),
           ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildFlashcardQuestion(Flashcard card) {
+    // Prompt depends on direction (Prompt is OPPOSITE of Answer)
+    final promptText = _currentAnswerWithTerm ? card.definition : card.term; // Prompt
+    final answerText = _currentAnswerWithTerm ? card.term : card.definition; // Correct Answer
+    
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          // Progress
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (_currentIndex + 1) / _cards.length,
+              backgroundColor: AppColors.surface,
+              valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+              minHeight: 4,
+            ),
+          ),
+          const SizedBox(height: 24),
+          
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                 if (!_flashcardRevealed) {
+                   setState(() => _flashcardRevealed = true);
+                   // Auto speak answer when revealed if TTS on? 
+                   // User asked: "speak current type... next... moves to it" -> this was for Flashcards Mode.
+                   // For Learn Mode, behavior not specified for TTS. Defaulting to speak answer.
+                   if (_textToSpeech) {
+                     context.read<TtsService>().speak(answerText);
+                   }
+                 }
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: AppColors.cardBackground,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.primary.withOpacity( 0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Stack(
+                  children: [
+                    Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            promptText,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.headlineMedium,
+                          ),
+                          if (_flashcardRevealed) ...[
+                            const SizedBox(height: 32),
+                            const Divider(),
+                            const SizedBox(height: 32),
+                            Text(
+                              answerText,
+                               textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ] else ...[
+                             const SizedBox(height: 48),
+                             Text(
+                               'Tap to reveal answer',
+                               style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                 color: AppColors.textSecondary,
+                               ),
+                             ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    
+                    // Manual TTS Button (Works even if setting is off)
+                    Positioned(
+                      top: 0,
+                      right: 0,
+                      child: IconButton(
+                        icon: const Icon(Icons.volume_up_outlined),
+                        onPressed: () {
+                          // Speak current visible content (or answer if revealed)
+                          final text = _flashcardRevealed ? answerText : promptText;
+                          context.read<TtsService>().speak(text, force: true);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 24),
+          
+          // Buttons
+          SizedBox(
+            height: 60,
+            child: _flashcardRevealed
+              ? Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.surface,
+                          foregroundColor: AppColors.error,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        onPressed: () => _handleFlashcardResult(false),
+                        child: const Text('Study again'),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                           padding: const EdgeInsets.symmetric(vertical: 16),
+                        ),
+                        onPressed: () => _handleFlashcardResult(true),
+                        child: const Text('Got it'),
+                      ),
+                    ),
+                  ],
+                )
+              : SizedBox.shrink(), // Or show a button saying "Tap card to reveal" if users don't guess to tap
+          ),
+          const SizedBox(height: 16),
         ],
       ),
     );
@@ -872,4 +1074,10 @@ enum _QuestionType {
   multipleChoice,
   written,
   flashcard,
+}
+
+enum _AnswerMode {
+  korean,
+  english,
+  both,
 }

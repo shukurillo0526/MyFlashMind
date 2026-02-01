@@ -14,10 +14,15 @@ class AppShell extends StatefulWidget {
 
 class AppShellState extends State<AppShell> {
   int _currentIndex = 0;
+  final GlobalKey<LibraryScreenState> _libraryKey = GlobalKey<LibraryScreenState>();
 
   /// Navigate to a specific tab
   void navigateToTab(int index) {
     setState(() => _currentIndex = index);
+    // Reload library data when switching to library tab
+    if (index == 2) {
+      _libraryKey.currentState?.reloadData();
+    }
   }
 
   /// Navigate to Create tab
@@ -34,7 +39,7 @@ class AppShellState extends State<AppShell> {
         children: [
           HomeScreen(onNavigateToCreate: goToCreate),
           const CreateScreen(),
-          LibraryScreen(onNavigateToCreate: goToCreate),
+          LibraryScreen(key: _libraryKey, onNavigateToCreate: goToCreate),
         ],
       ),
       bottomNavigationBar: Container(

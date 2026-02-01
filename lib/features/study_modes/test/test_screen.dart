@@ -79,16 +79,25 @@ class _TestScreenState extends State<TestScreen> {
     
     if (types.isEmpty) types.add(_QuestionType.multipleChoice);
     
-    for (final card in selectedCards) {
-      final type = types[_random.nextInt(types.length)];
-      
-      // Determine answer direction based on answerMode
-      bool answerWithTerm;
+      // Determine answer direction based on answerMode (Balanced)
+      List<bool> answerDirections;
       if (widget.answerMode == 'both') {
-        answerWithTerm = _random.nextBool(); // Randomly choose for each question
+        int half = (selectedCards.length / 2).ceil();
+        answerDirections = [
+          ...List.filled(half, true),
+          ...List.filled(selectedCards.length - half, false),
+        ]..shuffle();
+        if (answerDirections.length > selectedCards.length) {
+          answerDirections = answerDirections.sublist(0, selectedCards.length);
+        }
       } else {
-        answerWithTerm = widget.answerMode == 'term';
+        answerDirections = List.filled(selectedCards.length, widget.answerMode == 'term');
       }
+
+      for (int i = 0; i < selectedCards.length; i++) {
+        final card = selectedCards[i];
+        final type = types[_random.nextInt(types.length)];
+        final answerWithTerm = answerDirections[i];
       
       final prompt = answerWithTerm ? card.definition : card.term;
       final correctAnswer = answerWithTerm ? card.term : card.definition;

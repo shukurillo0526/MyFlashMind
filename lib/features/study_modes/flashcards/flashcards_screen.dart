@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../data/models/flashcard.dart';
@@ -89,15 +91,35 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     setState(() {
       _showingFront = !_showingFront;
     });
-    
-    // Speak the content using TTS if enabled
-    if (_textToSpeech && _currentIndex < _cards.length) {
-      final card = _cards[_currentIndex];
-      final text = _showingFront 
-          ? (_showFrontFirst ? card.term : card.definition)
-          : (_showFrontFirst ? card.definition : card.term);
-      context.read<TtsService>().speak(text);
+    // Auto-speak new side if enabled
+    if (_textToSpeech) {
+      _speakCurrentContent();
     }
+  }
+
+  void _speakCurrentContent() {
+    if (_currentIndex >= _cards.length) return;
+    
+    final card = _cards[_currentIndex];
+    // Speak based on visible side
+    final text = _showingFront 
+        ? (_showFrontFirst ? card.term : card.definition)
+        : (_showFrontFirst ? card.definition : card.term);
+        
+    context.read<TtsService>().speak(text, force: true);
+  }
+
+  void _toggleStar() async {
+    if (_currentIndex >= _cards.length) return;
+    final card = _cards[_currentIndex];
+    
+    setState(() {
+      card.isStarred = !card.isStarred;
+    });
+    
+    // Save to storage
+    await context.read<StorageService>().saveSet(_set!);
+    await context.read<SupabaseService>().saveSet(_set!);
   }
 
   void _markKnow() {
@@ -147,6 +169,11 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
       _showingFront = true;
       if (_currentIndex < _cards.length - 1) {
         _currentIndex++;
+        // Auto-speak new card (front)
+        if (_textToSpeech) {
+          // Small delay to allow flip animation/state settle if needed, but direct call is usually fine
+          Future.delayed(const Duration(milliseconds: 300), _speakCurrentContent);
+        }
       } else {
         _isComplete = true;
         _saveProgress();
@@ -304,17 +331,19 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                 const Divider(),
                 
                 // Keyboard shortcuts section
-                ExpansionTile(
-                  title: const Text('Keyboard shortcuts'),
-                  children: [
-                    _buildShortcutRow('Know', '→'),
-                    _buildShortcutRow('Still learning', '←'),
-                    _buildShortcutRow('Flip', 'Space'),
-                    _buildShortcutRow('Star', 'S'),
-                    _buildShortcutRow('Shuffle', 'H'),
-                    _buildShortcutRow('Audio', 'A'),
-                  ],
-                ),
+                // Keyboard shortcuts section - Show only on Web/Desktop
+                if (kIsWeb || !defaultTargetPlatform.toString().contains('android') && !defaultTargetPlatform.toString().contains('iOS'))
+                  ExpansionTile(
+                    title: const Text('Keyboard shortcuts'),
+                    children: [
+                      _buildShortcutRow('Know', '→'),
+                      _buildShortcutRow('Still learning', '←'),
+                      _buildShortcutRow('Flip', 'Space'),
+                      _buildShortcutRow('Star', 'S'),
+                      _buildShortcutRow('Listen', 'A'),
+                      _buildShortcutRow('Shuffle', 'H'),
+                    ],
+                  ),
                 const Divider(),
                 const SizedBox(height: 16),
                 
@@ -453,265 +482,207 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
       onHorizontalDragCancel: () {
         setState(() => _dragOffset = 0);
       },
-      child: Column(
-        children: [
-          // Progress bar
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                value: (_currentIndex + 1) / _cards.length,
-                backgroundColor: AppColors.surface,
-                valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
-                minHeight: 4,
-              ),
-            ),
-          ),
-
-          // Card with 3D flip and swipe indicator
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Stack(
-                children: [
-                  // Swipe indicator overlays
-                  if (_dragOffset != 0)
-                    Positioned.fill(
-                      child: AnimatedOpacity(
-                        opacity: (_dragOffset.abs() / 150).clamp(0, 0.6),
-                        duration: const Duration(milliseconds: 50),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: _dragOffset > 0 
-                                ? AppColors.success.withOpacity(0.2)
-                                : AppColors.error.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Center(
-                            child: Icon(
-                              _dragOffset > 0 ? Icons.check_circle : Icons.refresh,
-                              size: 64,
-                              color: _dragOffset > 0 ? AppColors.success : AppColors.error,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  // Card content with drag offset
-                  Transform.translate(
-                    offset: Offset(_dragOffset * 0.3, 0),
-                    child: Transform.rotate(
-                      angle: _dragOffset * 0.001,
-                      child: TweenAnimationBuilder<double>(
-                tween: Tween<double>(
-                  begin: _showingFront ? 1.0 : 0.0,
-                  end: _showingFront ? 0.0 : 1.0,
+      child: Focus(
+        autofocus: true,
+        child: CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.space): _flipCard,
+            const SingleActivator(LogicalKeyboardKey.arrowRight): _markKnow,
+            const SingleActivator(LogicalKeyboardKey.arrowLeft): _markLearning,
+            const SingleActivator(LogicalKeyboardKey.keyS): _toggleStar,
+            const SingleActivator(LogicalKeyboardKey.keyA): _speakCurrentContent,
+          },
+          child: Column(
+            children: [
+              // Progress bar
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: (_currentIndex + 1) / _cards.length,
+                    backgroundColor: AppColors.surface,
+                    valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
+                    minHeight: 4,
+                  ),
                 ),
-                duration: const Duration(milliseconds: 400),
-                curve: Curves.easeInOut,
-                builder: (context, value, child) {
-                  final angle = value * math.pi;
-                  final isFrontVisible = value < 0.5;
-                  final displayText = isFrontVisible ? card.term : card.definition;
-                  
-                  return Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()
-                      ..setEntry(3, 2, 0.001)
-                      ..rotateY(angle),
-                    child: Container(
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: _showingFront
-                              ? [AppColors.cardBackground, AppColors.surface]
-                              : [AppColors.primary.withOpacity(0.15), AppColors.cardBackground],
-                        ),
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppColors.primary.withOpacity(0.1),
-                            blurRadius: 20,
-                            spreadRadius: 0,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: Stack(
-                        children: [
-                          // Side indicator - wrapped in counter-rotation transform
-                          Positioned(
-                            top: 16,
-                            left: 16,
-                            right: 16,
-                            child: Transform(
-                              alignment: Alignment.center,
-                              transform: Matrix4.identity()..rotateY(value >= 0.5 ? math.pi : 0),
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                  decoration: BoxDecoration(
-                                    color: isFrontVisible 
-                                        ? AppColors.primary.withOpacity(0.2)
-                                        : AppColors.secondary.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Text(
-                                    isFrontVisible ? 'TERM' : 'DEFINITION',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: isFrontVisible ? AppColors.primary : AppColors.secondary,
-                                      letterSpacing: 1,
-                                    ),
-                                  ),
+              ),
+
+              // Card with 3D flip and swipe indicator
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Stack(
+                    children: [
+                      // Swipe indicator overlays
+                      if (_dragOffset != 0)
+                        Positioned.fill(
+                          child: AnimatedOpacity(
+                            opacity: (_dragOffset.abs() / 150).clamp(0, 0.6),
+                            duration: const Duration(milliseconds: 50),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: _dragOffset > 0 
+                                    ? AppColors.success.withOpacity(0.2)
+                                    : AppColors.error.withOpacity(0.2),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Center(
+                                child: Icon(
+                                  _dragOffset > 0 ? Icons.check_circle : Icons.refresh,
+                                  size: 64,
+                                  color: _dragOffset > 0 ? AppColors.success : AppColors.error,
                                 ),
                               ),
                             ),
                           ),
-                          Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(32),
-                              child: Transform(
+                        ),
+                      // Card content with drag offset
+                      Transform.translate(
+                        offset: Offset(_dragOffset * 0.3, 0),
+                        child: Transform.rotate(
+                          angle: _dragOffset * 0.001,
+                          child: TweenAnimationBuilder<double>(
+                            tween: Tween<double>(
+                              begin: _showingFront ? 1.0 : 0.0,
+                              end: _showingFront ? 0.0 : 1.0,
+                            ),
+                            duration: const Duration(milliseconds: 400),
+                            curve: Curves.easeInOut,
+                            builder: (context, value, child) {
+                              final angle = value * math.pi;
+                              final isFrontVisible = value < 0.5;
+                              final displayText = isFrontVisible 
+                                  ? (_showFrontFirst ? card.term : card.definition)
+                                  : (_showFrontFirst ? card.definition : card.term);
+                              
+                              return Transform(
                                 alignment: Alignment.center,
-                                transform: Matrix4.identity()..rotateY(value >= 0.5 ? math.pi : 0),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (!isFrontVisible && card.imageUrl != null)
-                                      Padding(
-                                        padding: const EdgeInsets.only(bottom: 16),
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(12),
-                                          child: Image.network(
-                                            card.imageUrl!,
-                                            height: 120,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (context, error, stackTrace) =>
-                                                const Icon(Icons.broken_image, size: 48, color: AppColors.textSecondary),
+                                transform: Matrix4.identity()
+                                  ..setEntry(3, 2, 0.001)
+                                  ..rotateY(angle),
+                                child: Container(
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                      colors: _showingFront
+                                          ? [AppColors.cardBackground, AppColors.surface]
+                                          : [AppColors.primary.withOpacity( 0.15), AppColors.cardBackground],
+                                    ),
+                                    borderRadius: BorderRadius.circular(20),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: AppColors.primary.withOpacity( 0.1),
+                                        blurRadius: 20,
+                                        spreadRadius: 0,
+                                        offset: const Offset(0, 8),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Stack(
+                                    children: [
+                                      // Content wrapped in counter-rotation to prevent mirroring
+                                      Center(
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(32),
+                                          child: Transform(
+                                            alignment: Alignment.center,
+                                            transform: Matrix4.identity()..rotateY(value >= 0.5 ? math.pi : 0),
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (!isFrontVisible && card.imageUrl != null)
+                                                  Padding(
+                                                    padding: const EdgeInsets.only(bottom: 16),
+                                                    child: ClipRRect(
+                                                      borderRadius: BorderRadius.circular(12),
+                                                      child: Image.network(
+                                                        card.imageUrl!,
+                                                        height: 120,
+                                                        fit: BoxFit.cover,
+                                                        errorBuilder: (context, error, stackTrace) =>
+                                                            const Icon(Icons.broken_image, size: 48, color: AppColors.textSecondary),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                Text(
+                                                  displayText,
+                                                  textAlign: TextAlign.center,
+                                                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                                    fontWeight: isFrontVisible ? FontWeight.bold : FontWeight.normal,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    Text(
-                                      displayText,
-                                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                                        fontWeight: FontWeight.w600,
+                                      
+                                      // Controls Overlay (Counter-rotated)
+                                      IgnorePointer(
+                                        ignoring: value >= 0.5 && _showingFront, // intricate hit testing fix if needed, but simple counter-rotate is visual
+                                        child: Transform(
+                                          alignment: Alignment.center,
+                                          transform: Matrix4.identity()..rotateY(value >= 0.5 ? math.pi : 0),
+                                          child: Stack(
+                                            children: [
+                                              // TTS Button (Top Left)
+                                              Positioned(
+                                                top: 16,
+                                                left: 16,
+                                                child: IconButton(
+                                                  icon: const Icon(Icons.volume_up_outlined),
+                                                  onPressed: _speakCurrentContent,
+                                                  tooltip: 'Listen (A)',
+                                                ),
+                                              ),
+                                              
+                                              // Star Button (Top Right)
+                                              Positioned(
+                                                top: 16,
+                                                right: 16,
+                                                child: IconButton(
+                                                  icon: Icon(
+                                                    card.isStarred ? Icons.star : Icons.star_border,
+                                                    color: card.isStarred ? Colors.amber : null,
+                                                  ),
+                                                  onPressed: _toggleStar,
+                                                  tooltip: 'Star (S)',
+                                                ),
+                                              ),
+                                              
+                                              // Side Label (Bottom Center? or Top Center?) -> Let's keep it simple or user removed text variable
+                                              // User requested "speak current type... when next type... moves to it"
+                                              // Let's add the label back but smaller if needed, or omit.
+                                              // Current code has "TERM" / "DEFINITION" label. I'll restore it but maybe at bottom?
+                                              // The user image had no label. I will omit the label for cleaner UI as per "image 1".
+                                            ],
+                                          ),
+                                        ),
                                       ),
-                                      textAlign: TextAlign.center,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          // Tap to flip hint - wrapped in counter-rotation transform
-                          Positioned(
-                            bottom: 16,
-                            left: 0,
-                            right: 0,
-                            child: Transform(
-                              alignment: Alignment.center,
-                              transform: Matrix4.identity()..rotateY(value >= 0.5 ? math.pi : 0),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(Icons.touch_app, size: 16, color: AppColors.textSecondary),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    'Tap to flip',
-                                    style: Theme.of(context).textTheme.bodySmall,
-                                    textAlign: TextAlign.center,
+                                    ],
                                   ),
-                                ],
-                              ),
-                            ),
+                                ),
+                              );
+                            },
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  );
-                },
-              ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
+              // Bottom spacing
+              const SizedBox(height: 32),
+            ],
           ),
-
-          // Action hints
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  children: [
-                    Icon(Icons.arrow_back, color: AppColors.warning),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Still learning',
-                      style: TextStyle(color: AppColors.warning, fontSize: 12),
-                    ),
-                  ],
-                ),
-                Column(
-                  children: [
-                    Icon(Icons.arrow_forward, color: AppColors.success),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Know',
-                      style: TextStyle(color: AppColors.success, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-
-          // SM-2 Rating Buttons
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-            child: Row(
-              children: [
-                _buildRatingButton(
-                  label: 'Again',
-                  color: AppColors.error,
-                  quality: 0,
-                  interval: '<1m',
-                ),
-                const SizedBox(width: 8),
-                _buildRatingButton(
-                  label: 'Hard',
-                  color: AppColors.warning,
-                  quality: 3,
-                  interval: '',
-                ),
-                const SizedBox(width: 8),
-                _buildRatingButton(
-                  label: 'Good',
-                  color: AppColors.success,
-                  quality: 4,
-                  interval: '',
-                ),
-                const SizedBox(width: 8),
-                _buildRatingButton(
-                  label: 'Easy',
-                  color: AppColors.primary,
-                  quality: 5,
-                  interval: '',
-                ),
-              ],
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
+
 
   Widget _buildCompleteView() {
     final total = _knowCards.length + _learningCards.length;
