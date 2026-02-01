@@ -6,6 +6,7 @@ import 'core/theme/app_theme.dart';
 import 'core/theme/theme_provider.dart';
 import 'data/services/storage_service.dart';
 import 'data/services/supabase_service.dart';
+import 'data/services/tts_service.dart';
 import 'features/app_shell.dart';
 import 'features/auth/auth_screen.dart';
 
@@ -25,11 +26,16 @@ void main() async {
   // Create Supabase service
   final supabaseService = SupabaseService(Supabase.instance.client);
   
+  // Create TTS service
+  final ttsService = TtsService();
+  await ttsService.init();
+  
   runApp(
     MultiProvider(
       providers: [
         Provider<StorageService>.value(value: storageService),
         Provider<SupabaseService>.value(value: supabaseService),
+        Provider<TtsService>.value(value: ttsService),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
       ],
       child: const MyFlashMindApp(),

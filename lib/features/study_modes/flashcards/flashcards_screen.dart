@@ -7,6 +7,7 @@ import '../../../data/models/flashcard_set.dart';
 import '../../../data/services/storage_service.dart';
 import '../../../data/services/supabase_service.dart';
 import '../../../data/services/spaced_repetition_service.dart';
+import '../../../data/services/tts_service.dart';
 
 /// Flashcard swipe study mode
 /// - Tap to flip card
@@ -34,10 +35,10 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
   List<Flashcard> _learningCards = [];
 
   // Settings
+  bool _shuffleCards = false;
   bool _trackProgress = true;
   bool _studyStarredOnly = false;
   bool _showFrontFirst = true;  // true = Term (Korean), false = Definition
-  bool _showBothSides = false;
   bool _textToSpeech = false;
 
   @override
@@ -71,6 +72,11 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
       cards = List<Flashcard>.from(_set!.cards);
     }
     
+    // Apply shuffle
+    if (_shuffleCards) {
+      cards.shuffle();
+    }
+    
     _cards = cards;
     _currentIndex = 0;
     _showingFront = true;
@@ -83,6 +89,15 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     setState(() {
       _showingFront = !_showingFront;
     });
+    
+    // Speak the content using TTS if enabled
+    if (_textToSpeech && _currentIndex < _cards.length) {
+      final card = _cards[_currentIndex];
+      final text = _showingFront 
+          ? (_showFrontFirst ? card.term : card.definition)
+          : (_showFrontFirst ? card.definition : card.term);
+      context.read<TtsService>().speak(text);
+    }
   }
 
   void _markKnow() {
@@ -215,14 +230,66 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                 ),
                 const SizedBox(height: 16),
                 
-                // Track progress
+                // General section header
+                Text('General', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                )),
+                const SizedBox(height: 12),
+                
+                // Shuffle cards
                 _buildOptionRow(
-                  'Track progress',
+                  'Shuffle cards',
+                  _shuffleCards,
+                  (v) {
+                    setState(() => _shuffleCards = v);
+                    _applySettings();
+                  },
+                ),
+                const SizedBox(height: 16),
+                
+                // Text to speech
+                _buildOptionRow(
+                  'Text to speech',
+                  _textToSpeech,
+                  (v) {
+                    setState(() => _textToSpeech = v);
+                    context.read<TtsService>().isEnabled = v;
+                  },
+                ),
+                const SizedBox(height: 16),
+                
+                // Sort into piles (Track progress)
+                _buildOptionRow(
+                  'Sort into piles',
                   _trackProgress,
                   (v) => setState(() => _trackProgress = v),
                   description: 'Sort your flashcards to keep track of what you know and what you\'re still learning.',
                 ),
+                const SizedBox(height: 24),
+                const Divider(),
                 const SizedBox(height: 16),
+                
+                // Card orientation section
+                Text('Card orientation', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                )),
+                const SizedBox(height: 8),
+                Text('Front', style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 8),
+                // Segmented button for Korean/English
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(value: true, label: Text('Korean')),
+                    ButtonSegment(value: false, label: Text('English')),
+                  ],
+                  selected: {_showFrontFirst},
+                  onSelectionChanged: (Set<bool> newSelection) {
+                    setState(() => _showFrontFirst = newSelection.first);
+                    Navigator.pop(context);
+                    _showOptionsModal();
+                  },
+                ),
+                const SizedBox(height: 24),
                 
                 // Study only starred terms
                 _buildOptionRow(
@@ -232,48 +299,6 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                     setState(() => _studyStarredOnly = v);
                     _applySettings();
                   },
-                ),
-                const SizedBox(height: 16),
-                
-                // Front dropdown
-                Row(
-                  children: [
-                    const Expanded(child: Text('Front')),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: DropdownButton<bool>(
-                        value: _showFrontFirst,
-                        dropdownColor: AppColors.primary,
-                        underline: const SizedBox(),
-                        isDense: true,
-                        style: const TextStyle(color: Colors.white),
-                        iconEnabledColor: Colors.white,
-                        items: const [
-                          DropdownMenuItem(value: true, child: Text('Korean')),
-                          DropdownMenuItem(value: false, child: Text('English')),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            setState(() => _showFrontFirst = v);
-                            Navigator.pop(context);
-                            _showOptionsModal();
-                          }
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                
-                // Show both sides
-                _buildOptionRow(
-                  'Show both sides of cards',
-                  _showBothSides,
-                  (v) => setState(() => _showBothSides = v),
                 ),
                 const SizedBox(height: 24),
                 const Divider(),
@@ -291,14 +316,18 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                   ],
                 ),
                 const Divider(),
-                
-                // Text to speech
-                _buildOptionRow(
-                  'Text to speech',
-                  _textToSpeech,
-                  (v) => setState(() => _textToSpeech = v),
-                ),
                 const SizedBox(height: 16),
+                
+                // Restart Flashcards
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _restart();
+                    },
+                    child: const Text('Restart Flashcards', style: TextStyle(color: AppColors.error)),
+                  ),
+                ),
                 
                 // Restart Flashcards
                 TextButton(
@@ -407,7 +436,6 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     }
 
     final card = _cards[_currentIndex];
-    final text = _showingFront ? card.term : card.definition;
 
     return GestureDetector(
       onTap: _flipCard,

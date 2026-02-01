@@ -6,6 +6,10 @@ import '../../../data/models/flashcard.dart';
 import '../../../data/models/flashcard_set.dart';
 import '../../../data/services/storage_service.dart';
 import '../../../data/services/supabase_service.dart';
+import '../../../data/services/tts_service.dart';
+
+/// Grading modes for answer checking
+enum _GradingMode { relaxed, moderate, strict }
 
 /// Learn mode with adaptive spaced repetition
 /// - Multiple choice questions
@@ -33,21 +37,33 @@ class _LearnScreenState extends State<LearnScreen> {
   bool _showResult = false;
   String _writtenAnswer = '';
   final TextEditingController _answerController = TextEditingController();
+  bool _currentAnswerWithTerm = false; // Track current question direction
 
   // Stats
   int _correctCount = 0;
   int _incorrectCount = 0;
   final Random _random = Random();
 
-  // Settings
+  // Settings - General
   bool _shuffle = true;
-  bool _studyStarred = false;
-  bool _soundEffects = false;
+  bool _textToSpeech = false;
+  
+  // Settings - Prompt with (what shows as the question)
+  bool _promptWithKorean = true;  // Term
+  bool _promptWithEnglish = true; // Definition
+  
+  // Settings - Answer with (what you need to provide)
+  bool _answerWithKorean = true;  // Term
+  bool _answerWithEnglish = true; // Definition
+  
+  // Settings - Question types
+  bool _flashcardMode = false;
   bool _multipleChoice = true;
   bool _written = true;
-  bool _flashcardMode = false;
-  bool _answerWithKorean = true;
-  bool _textToSpeech = false;
+  
+  // Settings - Grading
+  _GradingMode _gradingMode = _GradingMode.relaxed;
+  bool _retypeCorrectAnswers = false;
 
   @override
   void initState() {
@@ -82,21 +98,53 @@ class _LearnScreenState extends State<LearnScreen> {
 
     final card = _cards[_currentIndex];
     
-    // Randomly choose question type
-    final types = _QuestionType.values;
-    _questionType = types[_random.nextInt(types.length)];
+    // Determine question direction based on settings
+    // If both prompt options are enabled, randomly choose
+    // If only one is enabled, use that direction
+    if (_promptWithKorean && _promptWithEnglish) {
+      _currentAnswerWithTerm = _random.nextBool();
+    } else if (_promptWithKorean) {
+      // Prompt is Korean (term), so answer with English (definition)
+      _currentAnswerWithTerm = false;
+    } else {
+      // Prompt is English (definition), so answer with Korean (term)
+      _currentAnswerWithTerm = true;
+    }
+    
+    // Randomly choose question type from enabled types
+    final availableTypes = <_QuestionType>[];
+    if (_multipleChoice) availableTypes.add(_QuestionType.multipleChoice);
+    if (_written) availableTypes.add(_QuestionType.written);
+    if (_flashcardMode) availableTypes.add(_QuestionType.flashcard);
+    
+    if (availableTypes.isEmpty) {
+      availableTypes.add(_QuestionType.multipleChoice);
+    }
+    
+    _questionType = availableTypes[_random.nextInt(availableTypes.length)];
+    
+    // Get correct answer based on direction
+    final correctAnswer = _currentAnswerWithTerm ? card.term : card.definition;
     
     // Generate multiple choice options
     if (_questionType == _QuestionType.multipleChoice) {
-      final correctAnswer = card.definition;
       final otherCards = _set!.cards.where((c) => c.id != card.id).toList()
         ..shuffle();
       
       _choices = [correctAnswer];
       for (int i = 0; i < 3 && i < otherCards.length; i++) {
-        _choices.add(otherCards[i].definition);
+        // Use same field for wrong answers
+        _choices.add(_currentAnswerWithTerm 
+            ? otherCards[i].term 
+            : otherCards[i].definition);
       }
       _choices.shuffle();
+    }
+    
+    // Speak the prompt if TTS is enabled
+    if (_textToSpeech) {
+      final prompt = _currentAnswerWithTerm ? card.definition : card.term;
+      context.read<TtsService>().speak(prompt);
     }
 
     setState(() {
@@ -109,7 +157,9 @@ class _LearnScreenState extends State<LearnScreen> {
 
   void _checkAnswer(String answer) {
     final card = _cards[_currentIndex];
-    final isCorrect = _isAnswerCorrect(answer, card.definition);
+    // Get correct answer based on current direction
+    final correctAnswer = _currentAnswerWithTerm ? card.term : card.definition;
+    final isCorrect = _isAnswerCorrect(answer, correctAnswer);
 
     setState(() {
       _selectedAnswer = answer;
@@ -127,23 +177,57 @@ class _LearnScreenState extends State<LearnScreen> {
   }
 
   bool _isAnswerCorrect(String answer, String correct) {
-    // Relaxed grading - case insensitive, trim whitespace
     final a = answer.toLowerCase().trim();
     final c = correct.toLowerCase().trim();
     
+    // Exact match always correct
     if (a == c) return true;
     
-    // Allow minor typos (1-2 characters difference for longer words)
-    if (c.length > 4) {
-      int diff = 0;
-      for (int i = 0; i < min(a.length, c.length); i++) {
-        if (a[i] != c[i]) diff++;
-      }
-      diff += (a.length - c.length).abs();
-      if (diff <= 2) return true;
+    // Apply grading mode tolerance
+    switch (_gradingMode) {
+      case _GradingMode.strict:
+        // Strict: exact match only (after case normalization)
+        return false;
+        
+      case _GradingMode.moderate:
+        // Moderate: allow 1 character difference for words > 3 chars
+        if (c.length > 3) {
+          int diff = _calculateLevenshteinDistance(a, c);
+          return diff <= 1;
+        }
+        return false;
+        
+      case _GradingMode.relaxed:
+        // Relaxed: allow 2 character differences for words > 4 chars
+        if (c.length > 4) {
+          int diff = _calculateLevenshteinDistance(a, c);
+          return diff <= 2;
+        }
+        return false;
     }
+  }
+  
+  /// Calculate Levenshtein distance between two strings
+  int _calculateLevenshteinDistance(String a, String b) {
+    if (a.isEmpty) return b.length;
+    if (b.isEmpty) return a.length;
     
-    return false;
+    List<int> prev = List.generate(b.length + 1, (i) => i);
+    List<int> curr = List.filled(b.length + 1, 0);
+    
+    for (int i = 0; i < a.length; i++) {
+      curr[0] = i + 1;
+      for (int j = 0; j < b.length; j++) {
+        int cost = a[i] == b[j] ? 0 : 1;
+        curr[j + 1] = [
+          curr[j] + 1,
+          prev[j + 1] + 1,
+          prev[j] + cost,
+        ].reduce((a, b) => a < b ? a : b);
+      }
+      prev = List.from(curr);
+    }
+    return curr[b.length];
   }
 
   void _nextQuestion() {
@@ -189,9 +273,9 @@ class _LearnScreenState extends State<LearnScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
+        initialChildSize: 0.85,
         minChildSize: 0.5,
-        maxChildSize: 0.9,
+        maxChildSize: 0.95,
         expand: false,
         builder: (context, scrollController) => SingleChildScrollView(
           controller: scrollController,
@@ -216,59 +300,133 @@ class _LearnScreenState extends State<LearnScreen> {
                 ),
                 const SizedBox(height: 16),
                 
-                // Toggle chips row
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    _buildToggleChip('Shuffle', _shuffle, (v) => setState(() => _shuffle = v)),
-                    _buildToggleChip('Study starred', _studyStarred, (v) => setState(() => _studyStarred = v)),
-                    _buildToggleChip('Sound effects', _soundEffects, (v) => setState(() => _soundEffects = v)),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                
-                // Question types
-                Text('Question types', style: Theme.of(context).textTheme.titleSmall?.copyWith(color: AppColors.error)),
+                // General section
+                Text('General', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                )),
                 const SizedBox(height: 12),
-                _buildOptionRow('Multiple choice', Icons.list, _multipleChoice, (v) => setState(() => _multipleChoice = v)),
-                _buildOptionRow('Written', Icons.edit, _written, (v) => setState(() => _written = v)),
-                _buildOptionRow('Flashcards', Icons.style, _flashcardMode, (v) => setState(() => _flashcardMode = v)),
-                
-                const SizedBox(height: 24),
-                
-                // Answer with
-                Text('Answer with', style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: 12),
-                _buildOptionRow('Korean', null, _answerWithKorean, (v) => setState(() => _answerWithKorean = v)),
-                _buildOptionRow('English', null, !_answerWithKorean, (v) => setState(() => _answerWithKorean = !v)),
-                
-                const SizedBox(height: 24),
-                
-                // Text to speech
-                _buildOptionRow('Text to speech', Icons.volume_up, _textToSpeech, (v) => setState(() => _textToSpeech = v)),
+                _buildOptionRow('Shuffle terms', Icons.shuffle, _shuffle, (v) {
+                  setState(() => _shuffle = v);
+                }),
+                _buildOptionRow('Text to speech', Icons.volume_up, _textToSpeech, (v) {
+                  setState(() => _textToSpeech = v);
+                  context.read<TtsService>().isEnabled = v;
+                }),
                 
                 const SizedBox(height: 24),
                 const Divider(),
+                const SizedBox(height: 16),
                 
-                // Restart Learn
-                TextButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    setState(() {
-                      _currentIndex = 0;
-                      _correctCount = 0;
-                      _incorrectCount = 0;
-                      _isComplete = false;
-                    });
-                    _generateQuestion();
-                  },
-                  child: const Text('Restart Learn', style: TextStyle(color: AppColors.error)),
+                // Prompt with section
+                Text('Prompt with', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                )),
+                const SizedBox(height: 8),
+                Text('Select what appears as the question', 
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
+                const SizedBox(height: 12),
+                _buildOptionRow('Korean (Term)', null, _promptWithKorean, (v) {
+                  // Ensure at least one is selected
+                  if (!v && !_promptWithEnglish) return;
+                  setState(() => _promptWithKorean = v);
+                }),
+                _buildOptionRow('English (Definition)', null, _promptWithEnglish, (v) {
+                  if (!v && !_promptWithKorean) return;
+                  setState(() => _promptWithEnglish = v);
+                }),
+                
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 16),
+                
+                // Answer with section
+                Text('Answer with', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                )),
+                const SizedBox(height: 8),
+                Text('Select what you need to provide as the answer', 
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
+                const SizedBox(height: 12),
+                _buildOptionRow('Korean (Term)', null, _answerWithKorean, (v) {
+                  if (!v && !_answerWithEnglish) return;
+                  setState(() => _answerWithKorean = v);
+                }),
+                _buildOptionRow('English (Definition)', null, _answerWithEnglish, (v) {
+                  if (!v && !_answerWithKorean) return;
+                  setState(() => _answerWithEnglish = v);
+                }),
+                
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 16),
+                
+                // Question types
+                Text('Question types', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                )),
+                const SizedBox(height: 12),
+                _buildOptionRow('Flashcards', Icons.style, _flashcardMode, (v) {
+                  if (!v && !_multipleChoice && !_written) return;
+                  setState(() => _flashcardMode = v);
+                }),
+                _buildOptionRow('Multiple choice', Icons.list, _multipleChoice, (v) {
+                  if (!v && !_flashcardMode && !_written) return;
+                  setState(() => _multipleChoice = v);
+                }),
+                _buildOptionRow('Written', Icons.edit, _written, (v) {
+                  if (!v && !_flashcardMode && !_multipleChoice) return;
+                  setState(() => _written = v);
+                }),
+                
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 16),
+                
+                // Grading options
+                Text('Grading options', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                )),
+                const SizedBox(height: 12),
+                _buildGradingOption(
+                  'Relaxed',
+                  'Minor typos (2 chars) allowed for words > 4 chars',
+                  _GradingMode.relaxed,
+                ),
+                _buildGradingOption(
+                  'Moderate', 
+                  'Max 1 typo allowed for words > 3 chars',
+                  _GradingMode.moderate,
+                ),
+                _buildGradingOption(
+                  'Strict',
+                  'Exact match only (case insensitive)',
+                  _GradingMode.strict,
                 ),
                 
-                // Privacy Policy
-                TextButton(
-                  onPressed: () {},
-                  child: const Text('Privacy Policy', style: TextStyle(color: AppColors.primary)),
+                const SizedBox(height: 16),
+                _buildOptionRow('Retype correct answers', null, _retypeCorrectAnswers, (v) {
+                  setState(() => _retypeCorrectAnswers = v);
+                }),
+                
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 16),
+                
+                // Restart Learn button
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      setState(() {
+                        _currentIndex = 0;
+                        _correctCount = 0;
+                        _incorrectCount = 0;
+                        _isComplete = false;
+                      });
+                      _generateQuestion();
+                    },
+                    child: const Text('Restart Learn', style: TextStyle(color: AppColors.error)),
+                  ),
                 ),
               ],
             ),
@@ -277,20 +435,50 @@ class _LearnScreenState extends State<LearnScreen> {
       ),
     );
   }
-
-  Widget _buildToggleChip(String label, bool value, Function(bool) onChanged) {
-    return FilterChip(
-      label: Text(label),
-      selected: value,
-      onSelected: (v) {
-        onChanged(v);
+  
+  Widget _buildGradingOption(String title, String description, _GradingMode mode) {
+    final isSelected = _gradingMode == mode;
+    return InkWell(
+      onTap: () {
+        setState(() => _gradingMode = mode);
         Navigator.pop(context);
         _showOptionsModal();
       },
-      selectedColor: AppColors.primary.withOpacity(0.2),
-      checkmarkColor: AppColors.primary,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Radio<_GradingMode>(
+              value: mode,
+              groupValue: _gradingMode,
+              onChanged: (v) {
+                if (v != null) {
+                  setState(() => _gradingMode = v);
+                  Navigator.pop(context);
+                  _showOptionsModal();
+                }
+              },
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: TextStyle(
+                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  )),
+                  Text(description, style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  )),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
+
+
 
   Widget _buildOptionRow(String label, IconData? icon, bool value, Function(bool) onChanged) {
     return Padding(
@@ -683,4 +871,5 @@ class _LearnScreenState extends State<LearnScreen> {
 enum _QuestionType {
   multipleChoice,
   written,
+  flashcard,
 }

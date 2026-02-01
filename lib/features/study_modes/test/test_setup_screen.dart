@@ -24,6 +24,10 @@ class _TestSetupScreenState extends State<TestSetupScreen> {
   bool _shuffleTerms = true;
   _AnswerMode _answerMode = _AnswerMode.definition;
   
+  // Prompt options (what appears as the question)
+  bool _promptWithKorean = true;   // Term
+  bool _promptWithEnglish = true;  // Definition
+  
   // Question types
   bool _trueFalse = false;
   bool _multipleChoice = true;
@@ -143,14 +147,26 @@ class _TestSetupScreenState extends State<TestSetupScreen> {
               ),
             ),
             const SizedBox(height: 12),
+            
+            // Answer options - opens modal
+            _buildOptionRow(
+              'Answer options',
+              subtitle: _getAnswerOptionsSubtitle(),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _showAnswerOptionsModal,
+            ),
+
+            const SizedBox(height: 24),
+            const Divider(color: AppColors.surface),
+            const SizedBox(height: 24),
 
             // Answer with
             Text('Answer with', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             SegmentedButton<_AnswerMode>(
               segments: const [
-                ButtonSegment(value: _AnswerMode.term, label: Text('Term')),
-                ButtonSegment(value: _AnswerMode.definition, label: Text('Definition')),
+                ButtonSegment(value: _AnswerMode.term, label: Text('Korean')),
+                ButtonSegment(value: _AnswerMode.definition, label: Text('English')),
                 ButtonSegment(value: _AnswerMode.both, label: Text('Both')),
               ],
               selected: {_answerMode},
@@ -220,8 +236,9 @@ class _TestSetupScreenState extends State<TestSetupScreen> {
     String label, {
     String? subtitle,
     required Widget trailing,
+    VoidCallback? onTap,
   }) {
-    return Row(
+    final content = Row(
       children: [
         Expanded(
           child: Column(
@@ -231,12 +248,101 @@ class _TestSetupScreenState extends State<TestSetupScreen> {
               if (subtitle != null)
                 Text(
                   subtitle,
-                  style: Theme.of(context).textTheme.bodySmall,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
                 ),
             ],
           ),
         ),
         trailing,
+      ],
+    );
+    
+    if (onTap != null) {
+      return InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: content,
+        ),
+      );
+    }
+    return content;
+  }
+  
+  String _getAnswerOptionsSubtitle() {
+    final prompts = <String>[];
+    if (_promptWithKorean) prompts.add('Korean');
+    if (_promptWithEnglish) prompts.add('English');
+    return 'Prompt with: ${prompts.join(', ')}';
+  }
+  
+  void _showAnswerOptionsModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Answer options',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            Text('Prompt with', style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: AppColors.textSecondary,
+            )),
+            const SizedBox(height: 8),
+            Text('Select what appears as the question', 
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary)),
+            const SizedBox(height: 12),
+            
+            _buildModalToggle('Korean (Term)', _promptWithKorean, (v) {
+              if (!v && !_promptWithEnglish) return;
+              setState(() => _promptWithKorean = v);
+              Navigator.pop(context);
+              _showAnswerOptionsModal();
+            }),
+            const SizedBox(height: 8),
+            _buildModalToggle('English (Definition)', _promptWithEnglish, (v) {
+              if (!v && !_promptWithKorean) return;
+              setState(() => _promptWithEnglish = v);
+              Navigator.pop(context);
+              _showAnswerOptionsModal();
+            }),
+            
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildModalToggle(String label, bool value, Function(bool) onChanged) {
+    return Row(
+      children: [
+        Expanded(child: Text(label)),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+        ),
       ],
     );
   }

@@ -37,14 +37,8 @@ class _LibraryScreenState extends State<LibraryScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadData();
+      if (mounted) _loadData();
     });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _loadData();
   }
 
   @override
@@ -226,22 +220,6 @@ class _LibraryScreenState extends State<LibraryScreen>
       // Delete from cloud
       await context.read<SupabaseService>().deleteFolder(folder.id);
       _loadData();
-    }
-  }
-
-  String _getDateGroupLabel(DateTime date) {
-    final now = DateTime.now();
-    final thisMonth = DateTime(now.year, now.month);
-    final dateMonth = DateTime(date.year, date.month);
-
-    if (dateMonth == thisMonth) {
-      return 'This month';
-    } else {
-      final monthNames = [
-        'January', 'February', 'March', 'April', 'May', 'June',
-        'July', 'August', 'September', 'October', 'November', 'December'
-      ];
-      return 'In ${monthNames[date.month - 1]} ${date.year}';
     }
   }
 
