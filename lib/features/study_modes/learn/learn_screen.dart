@@ -1026,7 +1026,7 @@ class _LearnScreenState extends State<LearnScreen> {
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                side: BorderSide(color: AppColors.border),
+                side: BorderSide(color: AppColors.surfaceLight),
                 alignment: Alignment.centerLeft,
               ),
               child: Text(
