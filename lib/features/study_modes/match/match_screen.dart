@@ -28,6 +28,8 @@ class _MatchScreenState extends State<MatchScreen>
   late Stopwatch _stopwatch;
   Timer? _timer;
   Duration _elapsed = Duration.zero;
+  Duration _penalty = Duration.zero;
+
   
   // Animation
   late AnimationController _shakeController;
@@ -95,7 +97,7 @@ class _MatchScreenState extends State<MatchScreen>
     _stopwatch.start();
     _timer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       setState(() {
-        _elapsed = _stopwatch.elapsed;
+        _elapsed = _stopwatch.elapsed + _penalty;
       });
     });
   }
@@ -148,6 +150,9 @@ class _MatchScreenState extends State<MatchScreen>
           _shakeController.reset();
         });
         setState(() {
+          _penalty += const Duration(seconds: 1); // Add penalty
+          _elapsed = _stopwatch.elapsed + _penalty; // Update display immediately
+          
           _selectedTile!.isSelected = false;
           tile.isSelected = true;
           _selectedTile = tile;
@@ -159,7 +164,9 @@ class _MatchScreenState extends State<MatchScreen>
   void _restart() {
     setState(() {
       _isComplete = false;
+      _isComplete = false;
       _elapsed = Duration.zero;
+      _penalty = Duration.zero;
       _selectedTile = null;
       _generateTiles();
     });

@@ -321,6 +321,13 @@ class _TestScreenState extends State<TestScreen> {
             decoration: BoxDecoration(
               color: AppColors.cardBackground,
               borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
             child: Text(
               question.prompt,
@@ -350,6 +357,13 @@ class _TestScreenState extends State<TestScreen> {
               decoration: BoxDecoration(
                 color: AppColors.surface,
                 borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: Text(
                 question.displayedAnswer ?? '',
@@ -398,6 +412,8 @@ class _TestScreenState extends State<TestScreen> {
               child: Material(
                 color: AppColors.cardBackground,
                 borderRadius: BorderRadius.circular(12),
+                elevation: 2,
+                shadowColor: Colors.black.withOpacity(0.1),
                 child: InkWell(
                   onTap: () => _submitAnswer(choice),
                   borderRadius: BorderRadius.circular(12),

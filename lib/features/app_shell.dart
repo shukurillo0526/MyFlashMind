@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 import 'home/home_screen.dart';
 import 'library/library_screen.dart';
+import 'library/library_screen.dart';
 import 'create/create_screen.dart';
+import 'profile/profile_screen.dart';
 
 /// Main app shell with bottom navigation bar
 class AppShell extends StatefulWidget {
@@ -40,6 +42,7 @@ class AppShellState extends State<AppShell> {
           HomeScreen(onNavigateToCreate: goToCreate),
           const CreateScreen(),
           LibraryScreen(key: _libraryKey, onNavigateToCreate: goToCreate),
+          const ProfileScreen(),
         ],
       ),
       bottomNavigationBar: Container(
@@ -69,6 +72,11 @@ class AppShellState extends State<AppShell> {
               icon: Icon(Icons.folder_outlined),
               activeIcon: Icon(Icons.folder),
               label: 'Library',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              activeIcon: Icon(Icons.person),
+              label: 'Profile',
             ),
           ],
         ),

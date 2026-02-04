@@ -138,18 +138,13 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
     final sr = SpacedRepetitionService();
     
     // Calculate new review parameters
-    final result = sr.calculateNextReview(
-      currentEF: card.easinessFactor,
-      currentInterval: card.interval,
-      currentRepetitions: card.repetitions,
-      quality: quality,
-    );
+    // Determine 0-5 quality based on swipe
+    // 0 = Again (Left)
+    // 4 = Good (Right)
+    // 5 = Perfect (If we want to add later)
     
     // Update card with new values
-    card.easinessFactor = result.ef;
-    card.interval = result.interval;
-    card.repetitions = result.repetitions;
-    card.nextReviewDate = result.nextReview;
+    sr.processResult(card, quality);
     card.lastStudied = DateTime.now();
     
     // Track for summary
@@ -564,20 +559,13 @@ class _FlashcardsScreenState extends State<FlashcardsScreen> {
                                 child: Container(
                                   width: double.infinity,
                                   decoration: BoxDecoration(
-                                    gradient: LinearGradient(
-                                      begin: Alignment.topLeft,
-                                      end: Alignment.bottomRight,
-                                      colors: _showingFront
-                                          ? [AppColors.cardBackground, AppColors.surface]
-                                          : [AppColors.primary.withOpacity( 0.15), AppColors.cardBackground],
-                                    ),
+                                    color: AppColors.cardBackground,
                                     borderRadius: BorderRadius.circular(20),
                                     boxShadow: [
                                       BoxShadow(
-                                        color: AppColors.primary.withOpacity( 0.1),
-                                        blurRadius: 20,
-                                        spreadRadius: 0,
-                                        offset: const Offset(0, 8),
+                                        color: Colors.black.withOpacity(0.05),
+                                        blurRadius: 10,
+                                        offset: const Offset(0, 4),
                                       ),
                                     ],
                                   ),

@@ -103,22 +103,31 @@ class SupabaseService {
     await _client.from('flashcards').delete().eq('set_id', set.id);
 
     // Insert cards with position
-    for (int i = 0; i < set.cards.length; i++) {
-      final card = set.cards[i];
-      await _client.from('flashcards').insert({
-        'id': card.id,
-        'set_id': set.id,
-        'term': card.term,
-        'definition': card.definition,
-        'term_language': card.termLanguage,
-        'definition_language': card.definitionLanguage,
-        'image_url': card.imageUrl,
-        'times_correct': card.timesCorrect,
-        'times_incorrect': card.timesIncorrect,
-        'last_studied': card.lastStudied?.toIso8601String(),
-        'is_starred': card.isStarred,
-        'position': i,
+    // Insert cards with position (Batch Insert)
+    if (set.cards.isNotEmpty) {
+      final cardsData = List<Map<String, dynamic>>.generate(set.cards.length, (i) {
+        final card = set.cards[i];
+        return {
+          'id': card.id,
+          'set_id': set.id,
+          'term': card.term,
+          'definition': card.definition,
+          'term_language': card.termLanguage,
+          'definition_language': card.definitionLanguage,
+          'image_url': card.imageUrl,
+          'times_correct': card.timesCorrect,
+          'times_incorrect': card.timesIncorrect,
+          'last_studied': card.lastStudied?.toIso8601String(),
+          'is_starred': card.isStarred,
+          'easiness_factor': card.easinessFactor,
+          'interval': card.interval,
+          'repetitions': card.repetitions,
+          'next_review_date': card.nextReviewDate?.toIso8601String(),
+          'position': i,
+        };
       });
+      
+      await _client.from('flashcards').insert(cardsData);
     }
   }
 

@@ -276,60 +276,30 @@ class _FlashcardDetailScreenState extends State<FlashcardDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          AppColors.primary.withOpacity(0.1),
-                          AppColors.secondary.withOpacity(0.1),
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: AppColors.surface,
-                        width: 1,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildStatItem(
-                          icon: Icons.emoji_events,
-                          color: AppColors.accent,
-                          value: '${(_set!.progress * 100).round()}%',
-                          label: 'Mastery',
-                        ),
-                        Container(
-                          width: 1,
-                          height: 40,
-                          color: AppColors.surface,
-                        ),
-                        _buildStatItem(
-                          icon: Icons.check_circle,
-                          color: AppColors.success,
-                          value: '${_calculateAccuracy()}%',
-                          label: 'Accuracy',
-                        ),
-                        Container(
-                          width: 1,
-                          height: 40,
-                          color: AppColors.surface,
-                        ),
-                        _buildStatItem(
-                          icon: Icons.access_time,
-                          color: AppColors.secondary,
-                          value: _getLastStudiedText(),
-                          label: 'Last Study',
-                        ),
-                      ],
-                    ),
-                  ),
+                  _buildMasteryDashboard(),
                 ],
               ),
             ),
+            const SizedBox(height: 24),
+            
+            // Terms List
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Terms in this set (${_set!.cards.length})',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _buildTermsList(),
+                ],
+              ),
+            ),
+            const SizedBox(height: 48),
             const SizedBox(height: 24),
           ],
         ),
@@ -357,29 +327,133 @@ class _FlashcardDetailScreenState extends State<FlashcardDetailScreen> {
     return '${(diff.inDays / 7).round()}w ago';
   }
 
-  Widget _buildStatItem({
-    required IconData icon,
-    required Color color,
-    required String value,
-    required String label,
-  }) {
+  Widget _buildMasteryDashboard() {
+    // Calculate counts based on SM-2 repetitions
+    int newCards = 0;
+    int familiar = 0;
+    int mastered = 0;
+
+    for (final card in _set!.cards) {
+      if (card.repetitions == 0) {
+        newCards++;
+      } else if (card.repetitions == 1) {
+        familiar++;
+      } else {
+        mastered++;
+      }
+    }
+    
+    final total = _set!.cards.isEmpty ? 1 : _set!.cards.length;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.cardBackground,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.surface),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Segmented Bar
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              height: 12,
+              child: Row(
+                children: [
+                  if (mastered > 0)
+                    Expanded(flex: mastered, child: Container(color: AppColors.success)),
+                  if (familiar > 0)
+                    Expanded(flex: familiar, child: Container(color: AppColors.warning)),
+                  if (newCards > 0)
+                    Expanded(flex: newCards, child: Container(color: AppColors.surfaceLight)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Legend
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildLegendItem(newCards.toString(), 'New', AppColors.textSecondary),
+              _buildLegendItem(familiar.toString(), 'Familiar', AppColors.warning),
+              _buildLegendItem(mastered.toString(), 'Mastered', AppColors.success),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegendItem(String value, String label, Color color) {
     return Column(
       children: [
-        Icon(icon, color: color, size: 24),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 16,
-            color: color,
-          ),
-        ),
-        Text(
-          label,
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
+        Text(value, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: color)),
+        Text(label, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
       ],
+    );
+  }
+
+  Widget _buildTermsList() {
+    return Column(
+      children: _set!.cards.map((card) {
+        Color statusColor = AppColors.surfaceLight; // New
+        if (card.repetitions == 1) statusColor = AppColors.warning; // Familiar
+        if (card.repetitions >= 2) statusColor = AppColors.success; // Mastered
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.cardBackground,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+               BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 4,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(card.term, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 4),
+                    Text(card.definition, style: const TextStyle(color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.star_border, color: AppColors.textSecondary),
+                onPressed: () {
+                   // Toggle star (future)
+                },
+              ),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 
