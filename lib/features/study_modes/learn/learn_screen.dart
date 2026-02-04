@@ -121,6 +121,11 @@ class _LearnScreenState extends State<LearnScreen> {
     }
   }
 
+  bool _getUseTerm(String cardId) {
+    return _cardDirections[cardId] ?? (_answerMode == _AnswerMode.korean);
+  }
+
+
   void _startRound(int targetLevel) {
     if (_set == null) return;
     setState(() {
@@ -219,7 +224,8 @@ class _LearnScreenState extends State<LearnScreen> {
   void _checkAnswer(String answer) {
     if (_currentCard == null) return;
     
-    bool useTerm = _cardDirections[_currentCard!.id] ?? false;
+
+    bool useTerm = _getUseTerm(_currentCard!.id);
     final correctAnswer = useTerm ? _currentCard!.term : _currentCard!.definition;
     
     bool isCorrect = _isAnswerCorrect(answer, correctAnswer);
@@ -475,7 +481,7 @@ class _LearnScreenState extends State<LearnScreen> {
                   onChanged: (v) {
                     if(v != null) {
                       setState(() => _answerMode = v);
-                      _distributeDirections();
+                      _initializeCardDirections();
                       Navigator.pop(context);
                       _showOptionsModal();
                     }
@@ -544,10 +550,10 @@ class _LearnScreenState extends State<LearnScreen> {
                     onPressed: () {
                       Navigator.pop(context);
                       setState(() {
-                        _currentIndex = 0;
+                        _currentBatchIndex = 0;
                         _correctCount = 0;
                         _incorrectCount = 0;
-                        _isComplete = false;
+                        _isSessionComplete = false;
                       });
                       _generateQuestion();
                     },
@@ -725,7 +731,7 @@ class _LearnScreenState extends State<LearnScreen> {
     }
     
     // Prompt depending on direction
-    bool useTerm = _cardDirections[card.id] ?? false;
+    bool useTerm = _getUseTerm(card.id);
     final promptText = useTerm ? card.definition : card.term;
 
     return SingleChildScrollView(
@@ -779,7 +785,7 @@ class _LearnScreenState extends State<LearnScreen> {
   }
   
   Widget _buildFlashcardQuestion(Flashcard card) {
-    bool useTerm = _cardDirections[card.id] ?? false;
+    bool useTerm = _getUseTerm(card.id);
     final promptText = useTerm ? card.definition : card.term; // Prompt
     final answerText = useTerm ? card.term : card.definition; // Correct Answer
     
@@ -917,7 +923,7 @@ class _LearnScreenState extends State<LearnScreen> {
 
   Widget _buildMultipleChoice(Flashcard card) {
     if (_showResult) {
-      bool useTerm = _cardDirections[card.id] ?? false;
+      bool useTerm = _getUseTerm(card.id);
       final correctAnswer = useTerm ? card.term : card.definition;
       final isCorrect = _isAnswerCorrect(_selectedAnswer ?? '', correctAnswer);
       
@@ -1038,7 +1044,7 @@ class _LearnScreenState extends State<LearnScreen> {
     if (_showResult) {
        // Re-use MC result view logic or build similar
        // For brevity, using same logic structure
-       bool useTerm = _cardDirections[card.id] ?? false;
+       bool useTerm = _getUseTerm(card.id);
        final correctAnswer = useTerm ? card.term : card.definition;
        final isCorrect = _isAnswerCorrect(_writtenAnswer, correctAnswer);
        
