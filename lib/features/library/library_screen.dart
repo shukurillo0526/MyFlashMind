@@ -63,7 +63,8 @@ class LibraryScreenState extends State<LibraryScreen>
   void _loadData() {
     final storage = context.read<StorageService>();
     setState(() {
-      _sets = storage.getAllSets();
+      // Filter out temporary folder study sets (IDs start with 'folder_')
+      _sets = storage.getAllSets().where((s) => !s.id.startsWith('folder_')).toList();
       _folders = storage.getAllFolders();
       _isLoaded = true;
       _applySearch();
