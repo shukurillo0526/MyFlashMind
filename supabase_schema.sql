@@ -34,6 +34,11 @@ CREATE TABLE IF NOT EXISTS flashcards (
   last_studied TIMESTAMPTZ,
   is_starred BOOLEAN DEFAULT FALSE,
   position INTEGER DEFAULT 0,
+  -- SM-2 Spaced Repetition Fields
+  easiness_factor DOUBLE PRECISION DEFAULT 2.5,
+  interval INTEGER DEFAULT 1,
+  repetitions INTEGER DEFAULT 0,
+  next_review_date TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -43,6 +48,7 @@ CREATE TABLE IF NOT EXISTS folders (
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
   name TEXT NOT NULL,
   description TEXT,
+  set_ids TEXT[] DEFAULT '{}',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

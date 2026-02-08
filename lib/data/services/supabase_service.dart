@@ -161,6 +161,7 @@ class SupabaseService {
       'user_id': userId,
       'name': folder.name,
       'description': folder.description,
+      'set_ids': folder.setIds,
       'created_at': folder.createdAt.toIso8601String(),
       'updated_at': folder.updatedAt.toIso8601String(),
     });
@@ -207,6 +208,13 @@ class SupabaseService {
           ? DateTime.parse(row['last_studied']) 
           : null,
       isStarred: row['is_starred'] ?? false,
+      // SM-2 Spaced Repetition fields
+      easinessFactor: (row['easiness_factor'] as num?)?.toDouble() ?? 2.5,
+      interval: row['interval'] as int? ?? 1,
+      repetitions: row['repetitions'] as int? ?? 0,
+      nextReviewDate: row['next_review_date'] != null 
+          ? DateTime.parse(row['next_review_date']) 
+          : null,
     );
   }
 
@@ -215,6 +223,7 @@ class SupabaseService {
       id: row['id'],
       name: row['name'],
       description: row['description'],
+      setIds: (row['set_ids'] as List<dynamic>?)?.cast<String>() ?? [],
       createdAt: DateTime.parse(row['created_at']),
       updatedAt: DateTime.parse(row['updated_at']),
     );

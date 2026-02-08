@@ -91,7 +91,11 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
     }
   }
 
+  bool _isSaving = false;
+
   Future<void> _saveSet() async {
+    if (_isSaving) return;
+
     final title = _titleController.text.trim();
     if (title.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -113,52 +117,100 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
       return;
     }
 
-    final now = DateTime.now();
-    final flashcards = validCards.map((c) {
-      return Flashcard(
-        id: c.id ?? const Uuid().v4(),
-        term: c.termController.text.trim(),
-        definition: c.definitionController.text.trim(),
-        imageUrl: c.imageUrlController.text.trim().isNotEmpty 
-            ? c.imageUrlController.text.trim() 
+    setState(() => _isSaving = true);
+
+    try {
+      final now = DateTime.now();
+      
+      // Preserve existing card data when editing (SM-2 fields, progress, etc.)
+      final existingSet = _isEditing 
+          ? context.read<StorageService>().getSet(widget.editSetId!) 
+          : null;
+      
+      final flashcards = validCards.map((c) {
+        // Try to find existing card data to preserve SM-2 fields
+        final existingCard = existingSet?.cards.firstWhere(
+          (card) => card.id == c.id,
+          orElse: () => Flashcard(id: '', term: '', definition: ''),
+        );
+        
+        final isExisting = existingCard != null && existingCard.id == c.id;
+        
+        return Flashcard(
+          id: c.id ?? const Uuid().v4(),
+          term: c.termController.text.trim(),
+          definition: c.definitionController.text.trim(),
+          imageUrl: c.imageUrlController.text.trim().isNotEmpty 
+              ? c.imageUrlController.text.trim() 
+              : null,
+          // Preserve SM-2 data if editing existing card
+          timesCorrect: isExisting ? existingCard!.timesCorrect : 0,
+          timesIncorrect: isExisting ? existingCard.timesIncorrect : 0,
+          lastStudied: isExisting ? existingCard.lastStudied : null,
+          isStarred: isExisting ? existingCard.isStarred : false,
+          easinessFactor: isExisting ? existingCard.easinessFactor : 2.5,
+          interval: isExisting ? existingCard.interval : 1,
+          repetitions: isExisting ? existingCard.repetitions : 0,
+          nextReviewDate: isExisting ? existingCard.nextReviewDate : null,
+        );
+      }).toList();
+
+      final set = FlashcardSet(
+        id: widget.editSetId ?? const Uuid().v4(),
+        title: title,
+        description: _descriptionController.text.trim().isNotEmpty
+            ? _descriptionController.text.trim()
             : null,
+        cards: flashcards,
+        createdAt: existingSet?.createdAt ?? now,
+        updatedAt: now,
+        folderId: _selectedFolderId,
+        cardsKnown: existingSet?.cardsKnown ?? 0,
+        cardsLearning: existingSet?.cardsLearning ?? 0,
+        lastStudied: existingSet?.lastStudied,
       );
-    }).toList();
 
-    final set = FlashcardSet(
-      id: widget.editSetId ?? const Uuid().v4(),
-      title: title,
-      description: _descriptionController.text.trim().isNotEmpty
-          ? _descriptionController.text.trim()
-          : null,
-      cards: flashcards,
-      createdAt: _isEditing
-          ? context.read<StorageService>().getSet(widget.editSetId!)?.createdAt ?? now
-          : now,
-      updatedAt: now,
-      folderId: _selectedFolderId,
-    );
+      // Save locally
+      final storage = context.read<StorageService>();
+      final supabase = context.read<SupabaseService>();
+      
+      await storage.saveSet(set);
+      await supabase.saveSet(set);
 
-    // Save locally
-    final storage = context.read<StorageService>();
-    final supabase = context.read<SupabaseService>();
-    
-    await storage.saveSet(set);
-    await supabase.saveSet(set);
-
-    // Update folder if assigned
-    if (_selectedFolderId != null) {
-      final folder = _folders.firstWhere((f) => f.id == _selectedFolderId);
-      if (!folder.setIds.contains(set.id)) {
-        folder.setIds.add(set.id);
-        folder.updatedAt = DateTime.now();
-        await storage.saveFolder(folder);
-        await supabase.saveFolder(folder);
+      // Update folder if assigned
+      if (_selectedFolderId != null) {
+        final folder = _folders.firstWhere((f) => f.id == _selectedFolderId);
+        if (!folder.setIds.contains(set.id)) {
+          folder.setIds.add(set.id);
+          folder.updatedAt = DateTime.now();
+          await storage.saveFolder(folder);
+          await supabase.saveFolder(folder);
+        }
       }
-    }
 
-    if (mounted) {
-      Navigator.of(context).pop(true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_isEditing ? 'Set saved!' : 'Set created!'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
     }
   }
 
@@ -172,16 +224,25 @@ class _CreateSetScreenState extends State<CreateSetScreen> {
         ),
         title: Text(_isEditing ? 'Edit set' : 'Create set'),
         actions: [
-          TextButton(
-            onPressed: _saveSet,
-            child: Text(
-              _isEditing ? 'Save' : 'Create',
-              style: const TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
+          _isSaving
+              ? const Padding(
+                  padding: EdgeInsets.all(16),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : TextButton(
+                  onPressed: _saveSet,
+                  child: Text(
+                    _isEditing ? 'Save' : 'Create',
+                    style: const TextStyle(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
         ],
       ),
       body: Column(

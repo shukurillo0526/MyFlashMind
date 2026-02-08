@@ -5,7 +5,7 @@ import '../../data/services/storage_service.dart';
 import '../../data/services/supabase_service.dart';
 import '../../core/utils/quizlet_parser.dart';
 
-/// Screen for importing flashcards from Quizlet
+/// Screen for importing flashcards via manual paste
 class ImportQuizletScreen extends StatefulWidget {
   const ImportQuizletScreen({super.key});
 
@@ -13,61 +13,15 @@ class ImportQuizletScreen extends StatefulWidget {
   State<ImportQuizletScreen> createState() => _ImportQuizletScreenState();
 }
 
-class _ImportQuizletScreenState extends State<ImportQuizletScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  final _urlController = TextEditingController();
+class _ImportQuizletScreenState extends State<ImportQuizletScreen> {
   final _pasteController = TextEditingController();
   bool _isLoading = false;
   String? _error;
 
   @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
-
-  @override
   void dispose() {
-    _tabController.dispose();
-    _urlController.dispose();
     _pasteController.dispose();
     super.dispose();
-  }
-
-  Future<void> _importFromUrl() async {
-    final url = _urlController.text.trim();
-    if (url.isEmpty) {
-      setState(() => _error = 'Please enter a Quizlet URL');
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    try {
-      final result = await QuizletParser.importFromUrl(url);
-      if (result != null) {
-        // Save locally
-        await context.read<StorageService>().saveSet(result);
-        // Sync to cloud
-        await context.read<SupabaseService>().saveSet(result);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Imported "${result.title}" with ${result.termCount} cards')),
-          );
-          Navigator.of(context).pop();
-        }
-      } else {
-        setState(() => _error = 'Could not parse Quizlet set. Try manual paste.');
-      }
-    } catch (e) {
-      setState(() => _error = 'Error importing: $e');
-    } finally {
-      setState(() => _isLoading = false);
-    }
   }
 
   Future<void> _importFromPaste() async {
@@ -76,6 +30,11 @@ class _ImportQuizletScreenState extends State<ImportQuizletScreen>
       setState(() => _error = 'Please paste your flashcard data');
       return;
     }
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
 
     try {
       final result = QuizletParser.parseFromText(text);
@@ -86,15 +45,20 @@ class _ImportQuizletScreenState extends State<ImportQuizletScreen>
         await context.read<SupabaseService>().saveSet(result);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Imported "${result.title}" with ${result.termCount} cards')),
+            SnackBar(
+              content: Text('Imported "${result.title}" with ${result.termCount} cards'),
+              backgroundColor: Colors.green,
+            ),
           );
           Navigator.of(context).pop();
         }
       } else {
-        setState(() => _error = 'Could not parse the pasted text');
+        setState(() => _error = 'Could not parse the pasted text. Make sure each card is on alternating lines (term, then definition).');
       }
     } catch (e) {
       setState(() => _error = 'Error parsing: $e');
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -106,155 +70,97 @@ class _ImportQuizletScreenState extends State<ImportQuizletScreen>
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Import from Quizlet'),
+        title: const Text('Import Flashcards'),
       ),
-      body: Column(
-        children: [
-          // Tabs
-          TabBar(
-            controller: _tabController,
-            labelColor: AppColors.textPrimary,
-            unselectedLabelColor: AppColors.textSecondary,
-            indicatorColor: AppColors.primary,
-            tabs: const [
-              Tab(text: 'From URL'),
-              Tab(text: 'Manual Paste'),
-            ],
-          ),
-
-          // Error message
-          if (_error != null)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(8),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Paste Flashcard Data',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Copy flashcards from Quizlet (use Export feature) and paste below.\n'
+              'Supports: alternating lines (term, then definition) or tab/semicolon separators.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.textSecondary,
               ),
-              child: Text(_error!, style: const TextStyle(color: AppColors.error)),
             ),
+            const SizedBox(height: 16),
 
-          // Tab content
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildUrlTab(),
-                _buildPasteTab(),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+            // Error message
+            if (_error != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(_error!, style: const TextStyle(color: AppColors.error)),
+              ),
 
-  Widget _buildUrlTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Enter Quizlet Share URL',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Copy the share link from Quizlet and paste it below',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 16),
-
-          TextField(
-            controller: _urlController,
-            decoration: const InputDecoration(
-              hintText: 'https://quizlet.com/123456789/...',
-              prefixIcon: Icon(Icons.link),
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _isLoading ? null : _importFromUrl,
-              child: _isLoading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('Import'),
-            ),
-          ),
-
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, color: AppColors.textSecondary, size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Note: The set must be public to import. If import fails, use the Manual Paste option.',
-                    style: Theme.of(context).textTheme.bodySmall,
+            Expanded(
+              child: TextField(
+                controller: _pasteController,
+                maxLines: null,
+                expands: true,
+                textAlignVertical: TextAlignVertical.top,
+                decoration: InputDecoration(
+                  hintText: '가게\nstore\n공항\nairport\n...',
+                  alignLabelWithHint: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPasteTab() {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Paste Flashcard Data',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Copy flashcards from Quizlet (use Export feature) and paste below.\n'
-            'Supports: alternating lines (term, then definition) or separator formats',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 16),
-
-          Expanded(
-            child: TextField(
-              controller: _pasteController,
-              maxLines: null,
-              expands: true,
-              textAlignVertical: TextAlignVertical.top,
-              decoration: const InputDecoration(
-                hintText: '가게\nstore\n공항\nairport\n...',
-                alignLabelWithHint: true,
               ),
             ),
-          ),
-          const SizedBox(height: 16),
+            const SizedBox(height: 16),
 
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _importFromPaste,
-              child: const Text('Import'),
+            // Format help
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: AppColors.textSecondary, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Tip: In Quizlet, go to the set → "..." menu → Export → Copy all',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 16),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _importFromPaste,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                ),
+                child: _isLoading
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Import'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
